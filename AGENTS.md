@@ -59,7 +59,7 @@ website/               # Astro 5 website (separate package, see website/AGENTS.m
 
 ### Core Components
 
-**server.ts** — Entry point. Registers 16 MCP tools, handles CLI args (--help, --version, vault path), initializes services, routes tool calls. Auto-trims whitespace from all path arguments. Exits on stdin EOF / SIGTERM / SIGINT (graceful `server.close()`), otherwise hosts orphan the process (#159).
+**server.ts** — Entry point. Registers 25 MCP tools, handles CLI args (--help, --version, vault path), initializes services, routes tool calls. Auto-trims whitespace from all path arguments. Exits on stdin EOF / SIGTERM / SIGINT (graceful `server.close()`), otherwise hosts orphan the process (#159).
 
 **FileSystemService** (`src/filesystem.ts`) — Orchestrates file ops with security. Path resolution and traversal prevention. Implements: read, write, patch, delete, move, list, batch read, frontmatter update, tag management, vault stats. Uses native `fs/promises`.
 
@@ -69,7 +69,13 @@ website/               # Astro 5 website (separate package, see website/AGENTS.m
 
 **SearchService** (`src/search.ts`) — Content and frontmatter search with multi-word matching and BM25 relevance reranking. Returns token-optimized results with minified field names: `{p, t, ex, mc, ln, uri}`. Max 20 results.
 
-### 16 MCP Tools
+### 25 MCP Tools
+
+Grouped by what serves them. The **Routed** group goes through `VaultBackend`,
+so REST answers it when `OBSIDIAN_API_KEY` is set and the filesystem answers it
+otherwise. The other two groups always take one path, no matter the config.
+
+**Routed — REST-preferred, filesystem fallback (15)**
 
 | Tool | Description |
 |------|-------------|
@@ -78,7 +84,6 @@ website/               # Astro 5 website (separate package, see website/AGENTS.m
 | patch_note | Efficient partial update via find-and-replace |
 | list_directory | List files and folders in the vault |
 | delete_note | Delete a note (requires path confirmation) |
-| search_notes | Full-text search across vault content |
 | move_note | Move or rename a note |
 | move_file | Move or rename any file (binary-safe, file-only, requires path confirmation) |
 | read_multiple_notes | Batch read up to 10 notes |
@@ -86,9 +91,34 @@ website/               # Astro 5 website (separate package, see website/AGENTS.m
 | get_notes_info | Get metadata without reading content |
 | get_frontmatter | Extract frontmatter only |
 | manage_tags | Add, remove, or list tags |
-| get_vault_stats | Vault statistics: total notes, folders, size, recent files |
 | list_all_tags | List all tags across the vault with occurrence counts |
-| wiki_link | Resolve Obsidian [[wiki links]] (incl. path-qualified [[folder/Note]]) and return the note |
+| get_periodic_note | Resolve a daily note from `.obsidian/daily-notes.json` (daily only; other periods need the periodic-notes plugin) |
+| get_document_map | Headings, block refs, and frontmatter keys for a note |
+
+**Filesystem-only — never reaches REST (5)**
+
+| Tool | Description | Why |
+|------|-------------|-----|
+| search_notes | Full-text search across vault content | REST would change the result set based on whether Obsidian is open |
+| get_vault_stats | Vault statistics: total notes, folders, size, recent files | Whole-vault walk; REST could only serve it as N calls |
+| wiki_link | Resolve Obsidian [[wiki links]] (incl. path-qualified [[folder/Note]]) and return the note | Same |
+| get_recent_changes | Recently modified notes, by mtime | Reuses the vault scan; the Python equivalent needs Dataview and returns 400 here |
+| get_recent_periodic_notes | Recent daily notes | Filesystem-native by design |
+
+**Live-only — requires a running Obsidian, no fallback (5)**
+
+| Tool | Description |
+|------|-------------|
+| list_commands | Registered Obsidian commands |
+| execute_command | Run a registered command by id |
+| get_active_file | The note currently open in the UI |
+| open_file | Open a note in the Obsidian UI |
+| search_vault_advanced | Query Obsidian's index with a JsonLogic expression (Dataview DQL is not supported) |
+
+These five throw `ObsidianUnavailableError` when REST is unreachable. Note that
+`open_file` takes a path but is **not** covered by the fingerprint guard, which
+only protects `VaultBackend` — it can navigate the UI in a vault other than the
+server's `vaultPath`.
 
 ### Design Patterns
 

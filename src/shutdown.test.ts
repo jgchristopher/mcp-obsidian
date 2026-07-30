@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { spawn, ChildProcessWithoutNullStreams } from "child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { mkdtemp, rm } from "fs/promises";
 import { tmpdir } from "os";
 import { join, dirname } from "path";
