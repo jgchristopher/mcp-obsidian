@@ -55,7 +55,14 @@ Examples:
 const vaultPathArg = cliArgs.join(' ').trim();
 const vaultPath = resolve(vaultPathArg || process.cwd());
 
-const server = createServer(vaultPath, { version: VERSION });
+// Backend warnings — vault fingerprint mismatches, the Local REST API plugin
+// version floor — go to stderr, tagged so they are attributable in a host's
+// log. stdout is the MCP protocol stream on stdio transport; a stray line there
+// corrupts the session.
+const server = createServer(vaultPath, {
+  version: VERSION,
+  onWarn: (message: string) => process.stderr.write(`[mcpvault] ${message}\n`),
+});
 const transport = new StdioServerTransport();
 await server.connect(transport);
 

@@ -17,6 +17,15 @@ export interface CreateServerOptions {
      * error.
      */
     backend?: VaultBackend | undefined;
+    /**
+     * Where runtime warnings go — fingerprint mismatches and the plugin version
+     * floor. Defaults to `console.error`, i.e. **stderr**. Never write these to
+     * stdout: on stdio transport that stream carries the MCP protocol, and a
+     * stray line corrupts the session.
+     */
+    onWarn?: ((message: string) => void) | undefined;
+    /** Environment the REST config is read from. Injected by tests. */
+    env?: NodeJS.ProcessEnv | undefined;
 }
 export declare function createServer(vaultPath: string, options?: CreateServerOptions): Server;
 //# sourceMappingURL=createServer.d.ts.map

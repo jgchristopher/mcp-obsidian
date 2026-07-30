@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Implementation Notes — Phase 3</title>
+    <style>
+      :root {
+        --color-bg: #ffffff;
+        --color-surface: #f8f9fa;
+        --color-border: #dee2e6;
+        --color-text: #212529;
+        --color-text-muted: #6c757d;
+
+        --color-accent: #4361ee;
+        --color-accent-bg: #eef0ff;
+
+        --color-success: #2d6a4f;
+        --color-success-bg: #d8f3dc;
+
+        --color-danger: #9b2226;
+        --color-danger-bg: #fde8e8;
+
+        --color-warning: #b45309;
+        --color-warning-bg: #fef3c7;
+
+        --font-sans:
+          system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+          sans-serif;
+        --font-mono:
+          'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', Menlo, Consolas,
+          monospace;
+
+        --space-1: 4px;
+        --space-2: 8px;
+        --space-3: 16px;
+        --space-4: 24px;
+        --space-5: 32px;
+        --space-6: 48px;
+
+        --radius-sm: 4px;
+        --radius-md: 8px;
+        --radius-lg: 12px;
+
+        --max-width: 900px;
+        --sidebar-width: 220px;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        [data-theme='auto'] {
+          --color-bg: #1a1a2e;
+          --color-surface: #16213e;
+          --color-border: #2a2a4a;
+          --color-text: #e0e0e0;
+          --color-text-muted: #a0a0b0;
+
+          --color-accent: #6c83f7;
+          --color-accent-bg: #1e2a4a;
+
+          --color-success: #4ade80;
+          --color-success-bg: #14352a;
+
+          --color-danger: #f87171;
+          --color-danger-bg: #3a1818;
+
+          --color-warning: #fbbf24;
+          --color-warning-bg: #3a2a08;
+        }
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: var(--font-sans);
+        font-size: 16px;
+        line-height: 1.6;
+        color: var(--color-text);
+        background: var(--color-bg);
+        max-width: var(--max-width);
+        margin: 0 auto;
+        padding: var(--space-5) var(--space-4);
+      }
+
+      .doc-header {
+        border-bottom: 1px solid var(--color-border);
+        padding-bottom: var(--space-3);
+        margin-bottom: var(--space-5);
+      }
+
+      .doc-header h1 {
+        margin: 0 0 var(--space-1) 0;
+        font-size: 28px;
+        line-height: 1.25;
+      }
+
+      .doc-meta {
+        color: var(--color-text-muted);
+        font-size: 14px;
+        margin: 0;
+      }
+
+      .doc-content h2 {
+        margin-top: var(--space-6);
+        padding-bottom: var(--space-2);
+        border-bottom: 1px solid var(--color-border);
+        font-size: 22px;
+      }
+
+      .doc-content h3 {
+        margin-top: var(--space-5);
+        font-size: 18px;
+      }
+
+      .doc-content p,
+      .doc-content li,
+      .doc-content dd {
+        font-size: 15px;
+      }
+
+      code {
+        font-family: var(--font-mono);
+        font-size: 0.9em;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        padding: 1px 4px;
+      }
+
+      .note-entry {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-left: 3px solid var(--color-accent);
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-4);
+        margin-bottom: var(--space-4);
+      }
+
+      .note-entry h3 {
+        margin-top: 0;
+      }
+
+      .note-entry dt {
+        font-weight: 600;
+        color: var(--color-text-muted);
+        font-size: 13px;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        margin-top: var(--space-3);
+      }
+
+      .note-entry dd {
+        margin: var(--space-1) 0 0 0;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="doc-header">
+      <h1>Implementation Notes — Phase 3</h1>
+      <p class="doc-meta">MCPVault REST Backend · 2026-07-30 · Routing, reachability, and vault fingerprint guard</p>
+    </header>
+    <main class="doc-content">
+      <section class="note-entry">
+        <h3>Health — takes a RestClient, not a RestConfig</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec's wiring snippet reads
+            <code>new Health(config, resolvedVaultPath, { onWarn })</code>, while its
+            API sketch declares <code>fingerprintRest(client: RestClient)</code>. The
+            two disagree about what <code>Health</code> holds.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            <code>Health</code> takes the <code>RestClient</code>. Building a second
+            client from the config inside <code>Health</code> would open a second
+            keep-alive agent and socket pool against the same loopback plugin, for
+            one request every 60 seconds. <code>createServer</code> hoists the client
+            into a local and hands the same instance to both
+            <code>RestBackend</code> and <code>Health</code>.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Follow the snippet literally and construct a client per health object,
+            accepting the duplicate pool. Rejected: the socket cap in
+            <code>RestClient</code> exists precisely to bound concurrency, and a
+            second uncounted pool undermines it.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>Plugin version floor — checked inside Health, not in server.ts</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec assigns the version-floor warning to <code>server.ts</code>, but
+            <code>createServer</code> is synchronous and <code>server.ts</code> holds
+            no REST client of its own. Reading the version there means a floating
+            promise at startup with nothing to await it.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            <code>Health</code> reads <code>GET /</code> once, on its first successful
+            fingerprint check, and emits the warning through the same
+            <code>onWarn</code> channel as a mismatch. It already owns a client and
+            already runs on a timer, so the check costs one extra request per
+            process. <code>server.ts</code> supplies the sink:
+            <code>process.stderr.write</code> with an <code>[mcpvault]</code> tag.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            A fire-and-forget <code>checkPluginVersion()</code> in
+            <code>server.ts</code>. Rejected: an unawaited promise that writes to
+            stderr after startup is harder to test and can outlive a fast shutdown.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>createServer — new <code>onWarn</code> and <code>env</code> options</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec's snippet hardcodes <code>console.error</code> inside
+            <code>createServer</code> and reads <code>process.env</code> implicitly
+            through <code>resolveRestConfig()</code>. Both make the REST wiring
+            untestable: warnings would land in the test runner's output, and a
+            developer shell carrying a real <code>OBSIDIAN_API_KEY</code> would point
+            the suite at a live Obsidian.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Two optional options. <code>onWarn</code> defaults to
+            <code>console.error</code>, so production behavior matches the snippet;
+            <code>env</code> defaults to <code>process.env</code>, so config
+            resolution is unchanged. The wiring tests inject both and drive the real
+            MCP handlers against the phase 2 fixture.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Mutate <code>process.env</code> in tests and spy on
+            <code>console.error</code>. Rejected: cross-test leakage, and it still
+            leaves the production path unable to tag its own warnings.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>RoutingBackend — the unknown-state message names its target</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec's <code>route</code> signature carries only an operation name,
+            but its error-handling table requires the message to name "the operation,
+            the note, and that the state is unverified".
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            <code>route</code> takes a third argument describing what the call
+            touches — a path, a joined path list, or
+            <code>oldPath -&gt; newPath</code> for moves. This message is the only
+            user-facing signal for the duplicate-write hazard, so it has to say which
+            note to go and check.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Keep the two-argument signature and emit a generic message. Rejected: an
+            operator told "a write may not have applied" with no path has nothing to
+            verify.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>Contract suite — three known divergences kept out of the assertions</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec requires literally identical assertions on both arms, but three
+            behaviors legitimately differ: <code>getNotesInfo.modified</code> (a real
+            mtime versus a fixture stat), <code>listAllTags</code> counts (occurrences
+            versus files-per-tag, credited to hierarchical parents), and
+            <code>deleteNote</code> with a non-default <code>trashMode</code> (REST
+            declares it unsupported).
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            <code>modified</code> is asserted for its type only; the tag seed uses one
+            occurrence per tag with no hierarchy, so both arithmetics agree on the
+            same numbers; <code>trashMode</code> variants are covered in the routing
+            and REST suites instead, where the unsupported path is the point. No
+            conditional skips, no arm-specific branches.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Assert the divergences per arm behind an <code>if (arm.name === …)</code>.
+            Rejected: that is a <code>skipIf</code> wearing a different hat, and it
+            would let a real regression hide inside an accepted difference.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>Fingerprint — dotfiles excluded on both sides</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec narrows the comparison to root-level <code>.md</code> filenames
+            because <code>PathFilter</code> drops dotfiles while the plugin does not.
+            <code>PathFilter</code> actually only drops a named deny-list, so a root
+            note called <code>.private.md</code> would pass one side and possibly not
+            the other.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            <code>reduceToFingerprint</code> applies one normalization to both
+            sources: drop directories, drop nested paths, drop leading-dot names, keep
+            <code>.md</code>, sort. Symmetry is what matters, not which rule is
+            chosen — an asymmetric filter is what permanently disables REST on a
+            correct machine.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Run each side through <code>PathFilter</code>. Rejected: it answers a
+            different question (what may a tool touch) and its deny-list can grow,
+            silently changing the fingerprint's meaning.
+          </dd>
+        </dl>
+      </section>
+    </main>
+  </body>
+</html>

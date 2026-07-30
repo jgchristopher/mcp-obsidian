@@ -47,9 +47,12 @@ src/
   types.ts             # All TypeScript interfaces
   backend/             # VaultBackend seam (see "Local REST API backend")
     types.ts           # VaultBackend interface, BackendFailure taxonomy
+    routing.ts         # RoutingBackend — REST-preferred routing, fallback policy
+    health.ts          # Health — reachability flag + vault fingerprint guard
     filesystem/        # FileSystemBackend — adapter over FileSystemService
     rest/              # RestBackend, RestClient, config
-    testing/           # fixture-server.ts — in-process Local REST API double
+    contract.test.ts   # One behavioral contract, run against both backends
+    testing/           # fixture-server.ts (REST double) + seed.ts (paired vault)
   *.test.ts            # Co-located test files
 website/               # Astro 5 website (separate package, see website/AGENTS.md)
 ```
@@ -116,8 +119,34 @@ When updating content, always update both. See `website/AGENTS.md` for full deta
 ## Local REST API backend
 
 `src/backend/` holds a `VaultBackend` seam so vault operations can be served by
-the filesystem or by the Obsidian Local REST API plugin. Nothing routes to REST
-yet; `createServer` still defaults to `FileSystemBackend`.
+the filesystem or by the Obsidian Local REST API plugin. `createServer` builds a
+`RoutingBackend` when `OBSIDIAN_API_KEY` is set and a plain `FileSystemBackend`
+otherwise — with the key unset, construction is identical to the pre-REST build.
+
+### Routing policy
+
+`RoutingBackend` prefers REST and falls back by failure kind, asymmetrically:
+
+| Failure | Read | Write |
+|---|---|---|
+| `never-sent` | filesystem | filesystem (nothing was applied) |
+| `unknown-state` | filesystem | **throws** — never re-applied |
+| `unsupported` | filesystem | filesystem (refused before sending) |
+| any HTTP status | no fallback — it is Obsidian's authoritative answer | same |
+
+Reads are listed explicitly in `READ_OPERATIONS`; anything absent is treated as
+a write. An operation added to `VaultBackend` and forgotten there loses fallback
+rather than gaining a duplicate write.
+
+### Vault fingerprint guard
+
+The plugin binds to whichever vault Obsidian has open; MCPVault binds to its
+`vaultPath` argument. `Health` compares the two by their **sorted set of
+root-level `.md` filenames** and refuses REST when they disagree. Revalidation
+is time-based (60s TTL), not failure-triggered: Obsidian is normally open, so a
+failure-triggered check would run once at startup and never catch a mid-session
+vault switch. Reachability is a boolean plus a timestamp (30s), not a circuit
+breaker — a closed Obsidian refuses on loopback immediately.
 
 ### Environment variables
 
@@ -184,5 +213,8 @@ When modifying file operations:
 - Outline/heading parsing must be fence-aware: `#` lines inside ``` blocks are not headings (`patch_note` has prior art).
 - The REST port default is **27123**, not the 27124 the plugin's OpenAPI document implies. Those are shipped defaults; the real ports come from the vault's plugin settings, and on jcOS HTTPS listens on 27123 with the insecure server disabled. A 27124 default fails every connection and looks exactly like "REST just never helps".
 - Never touch `NODE_TLS_REJECT_UNAUTHORIZED`. It disables certificate validation for every outbound request in the process. The plugin's self-signed cert is handled by `rejectUnauthorized` on `RestClient`'s own agent — the only permitted site (`grep -rn rejectUnauthorized src/backend/rest/`).
+- The fingerprint compares **only root-level `.md` filenames**. The plugin builds `/vault/` from `getFiles()` so it omits empty directories, while `PathFilter` drops dotfiles and restricted directories — comparing full listings mismatches on a correctly configured machine and silently pins the server to filesystem-only.
+- `src/backend/contract.test.ts` must never contain a `skipIf`. Its REST arm runs against the in-process fixture; gating it on a live Obsidian would let CI report success while proving nothing about backend equivalence.
+- Backend warnings go to **stderr** (`onWarn`, defaulting to `console.error`). stdout carries the MCP protocol on stdio transport; one stray line corrupts the session.
 - `RestClient` classifies transport failures on the request's `finish` event, never on `error.code`. `ETIMEDOUT` fires on both sides of the send boundary, and misreading a post-send timeout as `never-sent` is what duplicates an `append`. Node suppresses `finish` when the socket already errored, which is what makes the flag trustworthy.
 - Request timeouts use an explicit deadline timer, not `req.setTimeout`. Node arms the socket's idle timer only after `connect`, so a blackholed host would hang forever and the pre-send timeout would never fire.

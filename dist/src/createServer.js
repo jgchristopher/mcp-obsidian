@@ -1,6 +1,11 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, } from "@modelcontextprotocol/sdk/types.js";
 import { FileSystemBackend } from "./backend/filesystem/index.js";
+import { Health } from "./backend/health.js";
+import { RestBackend } from "./backend/rest/index.js";
+import { RestClient } from "./backend/rest/client.js";
+import { resolveRestConfig } from "./backend/rest/config.js";
+import { RoutingBackend } from "./backend/routing.js";
 import { FileSystemService } from "./filesystem.js";
 import { FrontmatterHandler, parseFrontmatter } from "./frontmatter.js";
 import { PathFilter } from "./pathfilter.js";
@@ -8,12 +13,24 @@ import { SearchService } from "./search.js";
 import { handleWikiLinkTool } from "./wikilink/index.js";
 import { resolve } from "path";
 export function createServer(vaultPath, options = {}) {
-    const { name = "mcpvault", version = "0.0.0", pathFilter = new PathFilter(), frontmatterHandler = new FrontmatterHandler(), } = options;
+    const { name = "mcpvault", version = "0.0.0", pathFilter = new PathFilter(), frontmatterHandler = new FrontmatterHandler(), onWarn = (message) => console.error(message), env = process.env, } = options;
     const resolvedVaultPath = resolve(vaultPath);
     // `fileSystem` still serves get_vault_stats and wiki_link directly. Do not remove it.
     const fileSystem = new FileSystemService(resolvedVaultPath, pathFilter, frontmatterHandler);
     const searchService = new SearchService(resolvedVaultPath, pathFilter);
-    const backend = options.backend ?? new FileSystemBackend(fileSystem);
+    const backend = options.backend ?? buildBackend();
+    /**
+     * With `OBSIDIAN_API_KEY` unset, `resolveRestConfig()` returns `null` and this
+     * is byte-identical to the pre-REST construction: no client, no agent, no
+     * extra request. That is what keeps behavior unchanged when REST is off.
+     */
+    function buildBackend() {
+        const config = resolveRestConfig(env);
+        if (!config)
+            return new FileSystemBackend(fileSystem);
+        const client = new RestClient(config);
+        return new RoutingBackend(new RestBackend(client, { vaultPath: resolvedVaultPath, pathFilter, frontmatterHandler }), new FileSystemBackend(fileSystem), new Health(client, resolvedVaultPath, { onWarn }));
+    }
     const server = new Server({ name, version }, {
         capabilities: { tools: {} },
     });

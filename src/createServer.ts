@@ -4,6 +4,11 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { FileSystemBackend } from "./backend/filesystem/index.js";
+import { Health } from "./backend/health.js";
+import { RestBackend } from "./backend/rest/index.js";
+import { RestClient } from "./backend/rest/client.js";
+import { resolveRestConfig } from "./backend/rest/config.js";
+import { RoutingBackend } from "./backend/routing.js";
 import type { VaultBackend } from "./backend/types.js";
 import { FileSystemService } from "./filesystem.js";
 import { FrontmatterHandler, parseFrontmatter } from "./frontmatter.js";
@@ -27,6 +32,15 @@ export interface CreateServerOptions {
    * error.
    */
   backend?: VaultBackend | undefined;
+  /**
+   * Where runtime warnings go — fingerprint mismatches and the plugin version
+   * floor. Defaults to `console.error`, i.e. **stderr**. Never write these to
+   * stdout: on stdio transport that stream carries the MCP protocol, and a
+   * stray line corrupts the session.
+   */
+  onWarn?: ((message: string) => void) | undefined;
+  /** Environment the REST config is read from. Injected by tests. */
+  env?: NodeJS.ProcessEnv | undefined;
 }
 
 export function createServer(vaultPath: string, options: CreateServerOptions = {}): Server {
@@ -35,13 +49,32 @@ export function createServer(vaultPath: string, options: CreateServerOptions = {
     version = "0.0.0",
     pathFilter = new PathFilter(),
     frontmatterHandler = new FrontmatterHandler(),
+    onWarn = (message: string) => console.error(message),
+    env = process.env,
   } = options;
 
   const resolvedVaultPath = resolve(vaultPath);
   // `fileSystem` still serves get_vault_stats and wiki_link directly. Do not remove it.
   const fileSystem = new FileSystemService(resolvedVaultPath, pathFilter, frontmatterHandler);
   const searchService = new SearchService(resolvedVaultPath, pathFilter);
-  const backend = options.backend ?? new FileSystemBackend(fileSystem);
+  const backend = options.backend ?? buildBackend();
+
+  /**
+   * With `OBSIDIAN_API_KEY` unset, `resolveRestConfig()` returns `null` and this
+   * is byte-identical to the pre-REST construction: no client, no agent, no
+   * extra request. That is what keeps behavior unchanged when REST is off.
+   */
+  function buildBackend(): VaultBackend {
+    const config = resolveRestConfig(env);
+    if (!config) return new FileSystemBackend(fileSystem);
+
+    const client = new RestClient(config);
+    return new RoutingBackend(
+      new RestBackend(client, { vaultPath: resolvedVaultPath, pathFilter, frontmatterHandler }),
+      new FileSystemBackend(fileSystem),
+      new Health(client, resolvedVaultPath, { onWarn }),
+    );
+  }
 
   const server = new Server({ name, version }, {
     capabilities: { tools: {} },

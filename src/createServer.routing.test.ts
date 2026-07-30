@@ -23,7 +23,9 @@ import type {
   TagManagementParams,
   UpdateFrontmatterParams,
 } from "./types.js";
-import { mkdtemp, mkdir, rm, writeFile } from "fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "fs/promises";
+import { startFixture } from "./backend/testing/fixture-server.js";
+import type { Fixture } from "./backend/testing/fixture-server.js";
 import { dirname, join } from "path";
 import { tmpdir } from "os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -419,7 +421,9 @@ describe("paths outside the vault are rejected for every routed tool", () => {
 
 test("omitting the backend option still serves routed tools from the filesystem", async () => {
   const vault = await mkdtemp(join(tmpdir(), "mcpvault-routing-default-"));
-  const server = createServer(vault, { version: "1.0.0" });
+  // `env: {}` pins this to the no-REST path: the point is the default backend,
+  // not whatever OBSIDIAN_API_KEY the developer's shell happens to carry.
+  const server = createServer(vault, { version: "1.0.0", env: {} });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const defaultClient = new Client({ name: "default-client", version: "1.0.0" });
   await Promise.all([defaultClient.connect(clientTransport), server.connect(serverTransport)]);
@@ -440,7 +444,7 @@ test("omitting the backend option still serves routed tools from the filesystem"
 
 test("passing backend: undefined falls through to the default", async () => {
   const vault = await mkdtemp(join(tmpdir(), "mcpvault-routing-undef-"));
-  const server = createServer(vault, { version: "1.0.0", backend: undefined });
+  const server = createServer(vault, { version: "1.0.0", backend: undefined, env: {} });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const undefClient = new Client({ name: "undef-client", version: "1.0.0" });
   await Promise.all([undefClient.connect(clientTransport), server.connect(serverTransport)]);
@@ -456,4 +460,121 @@ test("passing backend: undefined falls through to the default", async () => {
     await server.close();
     await rm(vault, { recursive: true });
   }
+});
+
+// ============================================================================
+// REST wiring
+// ============================================================================
+
+/**
+ * `createServer` builds the router only when `resolveRestConfig()` finds a key.
+ * These drive the real MCP handlers against the in-process fixture, so the
+ * whole chain — config, client, RestBackend, Health, RoutingBackend — is under
+ * test, not just its parts.
+ */
+describe("REST wiring", () => {
+  let vault: string;
+  let fixture: Fixture;
+  let warnings: string[];
+  let restClient: Client;
+  let teardown: () => Promise<void>;
+
+  async function boot(files: Record<string, string>, env: NodeJS.ProcessEnv): Promise<void> {
+    vault = await mkdtemp(join(tmpdir(), "mcpvault-rest-wiring-"));
+    for (const [path, content] of Object.entries(files)) {
+      const full = join(vault, path);
+      await mkdir(dirname(full), { recursive: true });
+      await writeFile(full, content);
+    }
+    warnings = [];
+    const server = createServer(vault, {
+      version: "1.0.0",
+      env,
+      onWarn: (message) => warnings.push(message),
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    restClient = new Client({ name: "rest-wiring-client", version: "1.0.0" });
+    await Promise.all([restClient.connect(clientTransport), server.connect(serverTransport)]);
+    teardown = async () => {
+      await restClient.close();
+      await server.close();
+    };
+  }
+
+  function envFor(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+    return {
+      OBSIDIAN_API_KEY: "wiring-key",
+      OBSIDIAN_HOST: "127.0.0.1",
+      OBSIDIAN_PORT: String(fixture.port),
+      OBSIDIAN_PROTOCOL: "http",
+      ...overrides,
+    };
+  }
+
+  afterEach(async () => {
+    try {
+      await teardown();
+    } catch {
+      // Ignore teardown errors
+    }
+    await fixture.close().catch(() => {});
+    await rm(vault, { recursive: true, force: true });
+  });
+
+  test("with OBSIDIAN_API_KEY unset, nothing reaches the Local REST API", async () => {
+    fixture = await startFixture({ files: { "root.md": "# Root" } });
+    await boot({ "root.md": "# Root" }, {});
+
+    const result = await restClient.callTool({
+      name: "write_note",
+      arguments: { path: "root.md", content: "# Written by filesystem" },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(fixture.requests, "no request should have been made at all").toEqual([]);
+    expect(await readFile(join(vault, "root.md"), "utf-8")).toBe("# Written by filesystem");
+  });
+
+  test("with a matching vault, writes are served by the Local REST API", async () => {
+    fixture = await startFixture({ files: { "root.md": "# Root" } });
+    await boot({ "root.md": "# Root" }, envFor());
+
+    const result = await restClient.callTool({
+      name: "write_note",
+      arguments: { path: "root.md", content: "# Written by REST" },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(fixture.files.get("root.md")).toBe("# Written by REST");
+    // The filesystem copy is untouched: REST served it, nothing double-applied.
+    expect(await readFile(join(vault, "root.md"), "utf-8")).toBe("# Root");
+    expect(warnings).toEqual([]);
+  });
+
+  test("a vault fingerprint mismatch keeps writes on the filesystem and warns", async () => {
+    fixture = await startFixture({ files: { "someone-elses-vault.md": "# Elsewhere" } });
+    await boot({ "root.md": "# Root" }, envFor());
+
+    const result = await restClient.callTool({
+      name: "write_note",
+      arguments: { path: "root.md", content: "# Written by filesystem" },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(await readFile(join(vault, "root.md"), "utf-8")).toBe("# Written by filesystem");
+    expect(fixture.files.has("root.md"), "the wrong vault must not be written").toBe(false);
+    expect(warnings.join("\n")).toMatch(/fingerprint mismatch/i);
+  });
+
+  test("an unreachable Obsidian falls back without an error", async () => {
+    fixture = await startFixture({ files: { "root.md": "# Root" } });
+    const port = fixture.port;
+    await fixture.close();
+    await boot({ "root.md": "# Root" }, envFor({ OBSIDIAN_PORT: String(port) }));
+
+    const result = await restClient.callTool({ name: "read_note", arguments: { path: "root.md" } });
+
+    expect(result.isError).toBeFalsy();
+    expect(JSON.parse(text(result)).content).toContain("# Root");
+  });
 });
