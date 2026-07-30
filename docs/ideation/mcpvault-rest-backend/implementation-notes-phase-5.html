@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Implementation Notes — Phase 5</title>
+    <style>
+      :root {
+        --color-bg: #ffffff;
+        --color-surface: #f8f9fa;
+        --color-border: #dee2e6;
+        --color-text: #212529;
+        --color-text-muted: #6c757d;
+
+        --color-accent: #4361ee;
+        --color-accent-bg: #eef0ff;
+
+        --color-success: #2d6a4f;
+        --color-success-bg: #d8f3dc;
+
+        --color-danger: #9b2226;
+        --color-danger-bg: #fde8e8;
+
+        --color-warning: #b45309;
+        --color-warning-bg: #fef3c7;
+
+        --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', Menlo, Consolas, monospace;
+
+        --space-1: 4px;
+        --space-2: 8px;
+        --space-3: 16px;
+        --space-4: 24px;
+        --space-5: 32px;
+        --space-6: 48px;
+
+        --radius-sm: 4px;
+        --radius-md: 8px;
+        --radius-lg: 12px;
+
+        --max-width: 900px;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        [data-theme='auto'] {
+          --color-bg: #1a1a2e;
+          --color-surface: #16213e;
+          --color-border: #2a2a4a;
+          --color-text: #e0e0e0;
+          --color-text-muted: #a0a0b0;
+
+          --color-accent: #6c83f7;
+          --color-accent-bg: #1e2a4a;
+
+          --color-success: #4ade80;
+          --color-success-bg: #14352a;
+
+          --color-danger: #f87171;
+          --color-danger-bg: #3a1818;
+
+          --color-warning: #fbbf24;
+          --color-warning-bg: #3a2a08;
+        }
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: var(--font-sans);
+        font-size: 16px;
+        line-height: 1.6;
+        color: var(--color-text);
+        background: var(--color-bg);
+        max-width: var(--max-width);
+        margin: 0 auto;
+        padding: var(--space-5) var(--space-4);
+      }
+
+      .doc-header {
+        border-bottom: 1px solid var(--color-border);
+        padding-bottom: var(--space-3);
+        margin-bottom: var(--space-5);
+      }
+
+      .doc-header h1 {
+        margin: 0 0 var(--space-1) 0;
+        font-size: 28px;
+        line-height: 1.25;
+      }
+
+      .doc-meta {
+        color: var(--color-text-muted);
+        font-size: 14px;
+        margin: 0;
+      }
+
+      .note-entry {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-4);
+        margin-bottom: var(--space-4);
+      }
+
+      .note-entry h3 {
+        margin: 0 0 var(--space-3) 0;
+        font-size: 17px;
+        line-height: 1.35;
+        color: var(--color-accent);
+      }
+
+      .note-entry dl {
+        margin: 0;
+      }
+
+      .note-entry dt {
+        font-size: 12px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--color-text-muted);
+        margin-top: var(--space-3);
+      }
+
+      .note-entry dt:first-child {
+        margin-top: 0;
+      }
+
+      .note-entry dd {
+        margin: var(--space-1) 0 0 0;
+      }
+
+      code {
+        font-family: var(--font-mono);
+        font-size: 0.9em;
+        background: var(--color-accent-bg);
+        padding: 1px 5px;
+        border-radius: var(--radius-sm);
+      }
+    </style>
+  </head>
+  <body>
+    <header class="doc-header">
+      <h1>Implementation Notes — Phase 5</h1>
+      <p class="doc-meta">MCPVault REST Backend · 2026-07-30 · Parity verification and cutover</p>
+    </header>
+    <main>
+      <section class="note-entry">
+        <h3>Live smoke script — the reachability guard was not sufficient</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec says the script should refuse to run when <code>OBSIDIAN_API_KEY</code> is unset
+            or <code>GET /</code> is unreachable, and lists "false pass from the filesystem" as a
+            failure mode the guard prevents. It does not prevent it. A reachable Obsidian holding a
+            <em>different</em> vault answers <code>GET /</code> happily, at which point
+            <code>Health.restUsable()</code> returns false and every routed tool is quietly served
+            from disk while the guard reports green.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            The preflight also compares <code>fingerprintRest(client)</code> against
+            <code>fingerprintFilesystem(vaultPath)</code> and refuses on mismatch, printing both root
+            listings. Both helpers were already exported standalone from
+            <code>src/backend/health.ts</code>, so this reuses the guard the routing layer uses
+            rather than inventing a second notion of vault identity.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Implement the spec literally and accept that the one failure mode the smoke run exists to
+            rule out could pass silently. Rejected: the whole point of the run is to justify deleting
+            the old server.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>Live smoke script — auth failure was being reported as "start Obsidian"</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            <code>fingerprintRest</code> throws for two unrelated reasons: a <code>BackendError</code>
+            when the request never got an answer, and a plain <code>Error</code> when the server
+            answered with a non-2xx. Collapsing both into one message told anyone with a stale key to
+            start an Obsidian that was already running.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Branch on <code>err instanceof BackendError</code>. Transport failures say start Obsidian
+            and name the 27123 port trap; HTTP failures say the server answered and refused, and
+            point at the key. Both branches were exercised manually — a bogus key produces the auth
+            message, and port 27124 produces the connection-refused message.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>Print the raw error and let the reader work it out. Rejected: a 401 reads as a network problem to most people.</dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>Live smoke script — an absent daily note counts as a pass</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec does not say what <code>get_periodic_note</code> should assert.
+            <code>src/backend/periodic/resolve.ts</code> returns <code>exists: false</code> for a
+            correctly resolved path whose file has not been created yet, which is a correct answer,
+            not a failure.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            The check passes on any resolved response and labels whether the note existed. Requiring
+            the file to exist would fail the whole run on any day the daily note had not been touched
+            yet, which is most mornings.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>Create the daily note first. Rejected: the run would write to a real note outside its scratch folder.</dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>Live smoke script — resolved promises are not passes</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            <code>createServer</code> catches every handler throw and returns
+            <code>{ isError: true }</code> rather than rejecting. Several tools additionally report
+            failure as <code>success: false</code> inside a resolved, non-error response.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            The shared <code>call()</code> helper checks <code>isError</code> and then parses the body
+            for an explicit <code>success: false</code>. Treating resolution as a pass would have
+            printed thirteen greens against a server whose every handler was broken — precisely the
+            evidence the cutover decision rests on.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>Rely on <code>await</code> throwing. Rejected: it never throws here.</dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>Parity table — 13 rows, 11 distinct targets</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec asks the test to assert "the count is exactly 13". Thirteen is the row count;
+            <code>list_directory</code> and <code>write_note</code> each answer two Python tools, so
+            only eleven distinct MCPVault tools are referenced.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Separate assertions: <code>length === 13</code>, thirteen unique <code>python</code>
+            names, and eleven unique <code>mcpvault</code> targets. An added test documents the 11
+            explicitly so a future reader does not "fix" it to 13.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>Assert 13 distinct targets, which fails immediately and misleadingly.</dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>README — two adjacent claims were false before this phase</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec scopes the README to the REST backend, the env vars, the port trap, and the
+            version floor. The Features list immediately above that content said "14 methods" (the
+            server registers 25) and "Zero dependencies: No Obsidian plugins required", which the new
+            section directly contradicts.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Corrected both. Leaving them would have produced a document that contradicts itself
+            within one screen. The tool count was updated to 25 with the new groups listed, and the
+            zero-dependencies bullet was reworded to say the core tools need no plugin while naming
+            the optional REST backend.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Stay strictly inside the spec's scope and flag the contradictions in the report.
+            Rejected for these two because they sit in the same list as the new content; other stale
+            spots found by the scout were left alone and are listed in the completion report.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>Scripts are outside every tsconfig</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            Neither <code>tsconfig.json</code> nor <code>tsconfig.build.json</code> includes
+            <code>scripts/</code>, and CI never compiles it. A type error in either new script would
+            ship and only surface when someone ran it.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Both scripts were typechecked against the project's strict settings via a temporary
+            config, which passed clean, and the temporary config was removed. The permanent fix —
+            adding <code>"scripts/**/*"</code> to <code>tsconfig.json</code>'s include — was not made,
+            because it is outside this spec's File Changes and would subject the directory to
+            <code>noUnusedLocals</code> and <code>exactOptionalPropertyTypes</code> as a side effect
+            of a parity phase.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>Expand the tsconfig now. Deferred to a follow-up so the change is deliberate rather than incidental.</dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>A third script file was added</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec's File Changes table lists two scripts. Review found that the benchmark
+            constructed <code>RestBackend</code> with no vault-identity guard, so a REST arm bound to
+            a different vault would write eighteen bench notes into that vault while the filesystem
+            arm wrote to this one, and the printed table would compare two vaults as one.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            The guard moved to <code>scripts/preflight.ts</code> and both scripts import it. Phase 2
+            already flagged duplicated path logic as a smell; copying a twenty-line safety check into
+            a second file would repeat that mistake in the one place where getting it wrong writes to
+            the wrong vault.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>Duplicate the guard, or export it from <code>src/backend/health.ts</code>. The first repeats a known smell; the second modifies a phase-3 file for a phase-5 need.</dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>Two notes are seeded, not one</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The two cross-arm checks assert that a REST-written note is visible to a filesystem read,
+            which is the run's strongest evidence that both arms address one vault. But
+            <code>get_recent_changes</code> is row 13 and <code>obsidian_delete_file</code> is row
+            10, so a single scratch note would be asserted present three checks after the run
+            deleted it.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            <code>SCRATCH_NOTE</code> is the mutable subject that the write, patch, append, and
+            delete checks operate on. <code>PERSIST_NOTE</code> is seeded alongside it, touched by no
+            check, and removed only in teardown; both cross-arm checks assert against it. Both are
+            written through the client so both are REST writes when REST is serving — a filesystem
+            seed would make the cross-arm assertion prove nothing.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>Drive the loop from a hand-ordered list instead of the table. Rejected: the table is the source of what must be covered, and a parallel ordering list is a second thing to keep in sync.</dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>Not every warning should fail the gate</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            Treating any warning as fatal was the first fix for "REST degraded mid-run goes
+            undetected". Review showed it both over- and under-fires.
+            <code>checkPluginVersionOnce</code> pushes the version-floor warning into the same array,
+            so a healthy run against a 4.1.6 plugin would fail the cutover gate for a condition the
+            README documents as warn-and-continue. And <code>Health</code> deliberately does
+            <em>not</em> warn when the fingerprint request fails with a <code>BackendError</code>, so
+            quitting Obsidian mid-run left the array empty and the gate green.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Warnings are partitioned on the <code>Vault fingerprint</code> prefix: those fail the run,
+            everything else prints as a note. Separately, the fingerprint is re-checked against the
+            preflight client after the loop, which is what actually closes the window between
+            preflight and the last assertion.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>Match on exact warning strings. Rejected as brittle against a reworded message in <code>health.ts</code>.</dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>The scratch folder was never being removed</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            Both scripts cleaned up with <code>rm(dir, { recursive: false })</code> under a
+            <code>.catch(() =&gt; {})</code>. That call throws <code>ERR_FS_EISDIR</code> on a
+            directory unconditionally — verified directly — so the catch swallowed it and
+            <code>MCPVault_Parity_Smoke/</code> would have accumulated as an empty folder in the
+            vault after every run, which is exactly what the comment above the line claimed to
+            prevent.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            <code>rmdir()</code> in both scripts. It removes an empty directory and fails
+            <code>ENOTEMPTY</code> if something unexpected is inside, which is a better signal than
+            <code>recursive: true</code> quietly deleting it.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            <code>rm(dir, { recursive: true })</code>. Rejected: it would delete a non-empty
+            directory without complaint, in a real vault.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>The scripts were driven against the in-repo fixture</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            Review's central objection to cycle 1 was that none of its four defects would have
+            survived a single live run, and no live run was possible without the API key.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Both scripts were run end to end against <code>src/backend/testing/fixture-server.ts</code>
+            over HTTP, pointed at a <code>mkdtemp</code> vault with a matching root note and a
+            <code>.obsidian/daily-notes.json</code>. The smoke run reaches 11/13 with a correct exit
+            code and no hang; the benchmark completes and its on-disk teardown was confirmed to leave
+            the vault root clean, which is how the EISDIR defect was caught.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Ship on the mapping test alone. Rejected: it would have shipped four defects. The
+            harness's limit is that the fixture's in-memory store and the temp vault are separate, so
+            the two cross-arm checks cannot pass there — they are expected to pass live, and that
+            remains the one assertion no run so far has verified.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>The cutover was not performed</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            Steps 1–7 of the spec's cutover edit <code>~/.claude.json</code>, delete the
+            <code>obsidian-jcos</code> entry, and require a live smoke run first. The user had
+            already decided to keep that edit under their own hand, and the permission layer blocked
+            reading <code>OBSIDIAN_API_KEY</code> out of the config, so the live smoke could not run
+            in this session either.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Everything mechanically verifiable was built and validated; the live smoke, the
+            benchmark, and the config edit are left as documented manual steps. Both scripts were
+            exercised through their refusal paths, which is the half that can be tested without the
+            key.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Extract the key another way and complete the cutover. Rejected: it works around a denial
+            rather than respecting it, and the user's standing instruction was explicit.
+          </dd>
+        </dl>
+      </section>
+    </main>
+  </body>
+</html>

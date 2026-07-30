@@ -126,13 +126,17 @@ MCP is an open protocol. You're not tied to any specific vendor or platform. You
 
 - ✅ Safe frontmatter parsing and validation using gray-matter with AST-aware updates that preserve raw formatting for unmodified fields
 - ✅ Path filtering to exclude `.obsidian` directory and other system files
-- ✅ **Complete MCP toolkit**: 14 methods covering all vault operations
+- ✅ **Complete MCP toolkit**: 25 methods covering all vault operations
   - File operations: `read_note`, `write_note`, `patch_note`, `delete_note`, `move_note`, `move_file`
   - Directory operations: `list_directory`
   - Batch operations: `read_multiple_notes`
   - Search: `search_notes` with multi-word matching and BM25 relevance reranking
-  - Metadata: `get_frontmatter`, `update_frontmatter`, `get_notes_info`, `get_vault_stats`
-  - Tag management: `manage_tags` (add, remove, list)
+  - Metadata: `get_frontmatter`, `update_frontmatter`, `get_notes_info`, `get_vault_stats`, `get_document_map`
+  - Tag management: `manage_tags` (add, remove, list), `list_all_tags`
+  - Links: `wiki_link`
+  - Periodic notes: `get_periodic_note`, `get_recent_periodic_notes`
+  - History: `get_recent_changes`
+  - Requires a running Obsidian: `list_commands`, `execute_command`, `get_active_file`, `open_file`, `search_vault_advanced`
 - ✅ Write modes: `overwrite`, `append`, `prepend` for flexible content editing
 - ✅ Tag management: add, remove, and list tags in notes
 - ✅ Safe deletion with confirmation requirement to prevent accidents
@@ -142,13 +146,118 @@ MCP is an open protocol. You're not tied to any specific vendor or platform. You
 - ✅ **Token-optimized responses**: 40-60% smaller responses with minified field names and compact JSON (v0.6.3+)
 - ✅ **Optional pretty-printing**: Set `prettyPrint: true` for human-readable debugging
 - ✅ **Performance optimized**: No unnecessary token consumption, efficient for large vaults
-- ✅ **Zero dependencies**: No Obsidian plugins required, works with any vault structure
+- ✅ **No plugins required**: every core tool reads and writes the vault directly on disk, so the server works with Obsidian closed and with any vault structure
+- ✅ **Optional Local REST API backend**: set `OBSIDIAN_API_KEY` to route supported operations through a running Obsidian and unlock five app-only tools — see [Obsidian Local REST API backend](#obsidian-local-rest-api-backend-optional)
 
 ## Prerequisites
 
 - [Node.js](https://nodejs.org) runtime (v18.0.0 or later)
 - An Obsidian vault (local directory with `.md`, `.markdown`, `.txt`, `.base`, or `.canvas` files)
 - MCP-compatible AI client (Claude Desktop, ChatGPT Desktop, Claude Code, etc.)
+
+## Obsidian Local REST API backend (optional)
+
+By default every tool reads and writes the vault directly on disk. Set
+`OBSIDIAN_API_KEY` and the server will additionally talk to the
+[Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api)
+plugin in a running Obsidian, which buys two things: Obsidian's own index
+answers supported operations, and five tools become available that have no
+filesystem equivalent at all.
+
+Leave the key unset and none of this code path runs. `resolveRestConfig()`
+returns `null`, the server builds a plain filesystem backend, and behavior is
+identical to a build with no REST support compiled in.
+
+### Environment variables
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `OBSIDIAN_API_KEY` | unset | **Unset disables REST entirely.** Copy it from the plugin's settings pane |
+| `OBSIDIAN_HOST` | `127.0.0.1` | |
+| `OBSIDIAN_PORT` | `27123` | Not 27124 — see below |
+| `OBSIDIAN_PROTOCOL` | `https` | |
+| `OBSIDIAN_VERIFY_SSL` | `false` | The plugin ships a self-signed certificate |
+
+These names match the Python `mcp-obsidian` server exactly, so an existing
+client entry migrates by copy-paste.
+
+A malformed port, protocol, or boolean **throws at startup** rather than falling
+back to a default. A typo should stop the server, not silently pin it to
+filesystem-only operation for weeks.
+
+### The 27123 port trap
+
+The plugin's own OpenAPI document lists **27124** as the HTTPS port and 27123 as
+the insecure one. In practice both are configurable in the plugin settings, and
+a vault where HTTPS listens on 27123 with the insecure server disabled is a
+normal configuration.
+
+Getting this wrong fails silently. The server cannot reach the plugin, quietly
+serves everything from disk, and nothing surfaces an error. Check which port is
+actually listening before trusting the setting:
+
+```bash
+lsof -iTCP:27123 -sTCP:LISTEN -n -P
+```
+
+### Plugin version floor
+
+**4.1.7 or later**, read from `versions.self` in `GET /`. An older version logs
+a warning on stderr and continues; it never refuses to start.
+
+### Vault identity guard
+
+The plugin binds to whichever vault Obsidian currently has open. This server
+binds to the `vaultPath` argument it was started with. Nothing connects the two,
+and the plugin exposes no vault identity on its status endpoint.
+
+Left unguarded, a server started against one vault while Obsidian held another
+would read and write different vaults depending only on whether the app happened
+to be running. Writes would land in the wrong vault with no error.
+
+So the two are compared by their sorted set of root-level `.md` filenames, and
+REST is refused when they disagree. Revalidation is **time-based** (60s), not
+triggered by connection failure: Obsidian is normally open, so a
+failure-triggered check would run once at startup and never catch a mid-session
+vault switch.
+
+A mismatch warns on stderr and degrades to filesystem-only. Switch Obsidian back
+to the vault the server was started with and REST re-enables on the next
+revalidation.
+
+### Which tools use REST
+
+Supported vault operations prefer REST and fall back to the filesystem when it
+is unreachable — with one deliberate asymmetry. A write whose outcome is
+**unknown** because Obsidian became unreachable mid-request throws rather than
+falling back, because re-applying it could duplicate the write. A write that
+provably never left the process does fall back.
+
+These are always served from disk and never reach REST: `search_notes`,
+`get_vault_stats`, `wiki_link`, `get_recent_changes`, and
+`get_recent_periodic_notes`.
+
+These five need a running Obsidian and have no filesystem fallback:
+`list_commands`, `execute_command`, `get_active_file`, `open_file`,
+`search_vault_advanced`.
+
+### Verifying a REST setup
+
+```bash
+npx tsx scripts/parity-smoke.ts /path/to/vault   # exits 0 only if all 13 mappings pass
+npx tsx scripts/backend-bench.ts /path/to/vault  # REST vs filesystem timings
+```
+
+The smoke script refuses to run unless REST is reachable **and** serving the
+vault under test, so it cannot report passes that the filesystem quietly
+produced.
+
+### Running from a local checkout
+
+Pointing a client at `dist/server.js` in a working copy ties the entry to that
+path. Moving or deleting the checkout breaks the server for every session that
+references it. Rebuild with `npm run build` after pulling, since `dist/` is
+committed and a stale build is otherwise invisible.
 
 ## Installation
 
@@ -989,6 +1098,19 @@ This MCP server implements several security measures to protect your Obsidian va
 - `src/search.ts` - Note search functionality with content and frontmatter support
 - `src/uri.ts` - Obsidian URI generation for deep links
 - `src/types.ts` - TypeScript type definitions
+
+The optional REST backend lives behind one interface, so the filesystem path is
+unchanged when it is disabled:
+
+- `src/backend/types.ts` - `VaultBackend` interface and the failure taxonomy
+- `src/backend/filesystem/` - filesystem implementation of that interface
+- `src/backend/rest/` - Local REST API client, backend, and config parsing
+- `src/backend/routing.ts` - REST-preferred routing and the fallback policy
+- `src/backend/health.ts` - reachability flag and the vault fingerprint guard
+- `src/backend/periodic/` - daily-note resolution from Obsidian's own config
+- `src/backend/live.ts` - the five tools that require a running Obsidian
+- `src/backend/parity.ts` - mapping from the Python `mcp-obsidian` tool names
+- `src/backend/testing/` - in-process REST fixture server used by the tests
 
 ## Contributing
 
