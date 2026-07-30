@@ -1,0 +1,269 @@
+{
+  "schemaVersion": "contract-data/1",
+  "projectName": "MCPVault REST Backend",
+  "slug": "mcpvault-rest-backend",
+  "date": "2026-07-30",
+  "status": "Approved",
+  "supersedes": null,
+  "gates": {
+    "dimensions": [
+      {
+        "key": "problem",
+        "label": "Problem Clarity",
+        "status": "ready",
+        "evidence": "Verified against the live setup: obsidian-jcos runs a pinned Python server whose get_recent_changes is broken because Dataview is absent (POST /search/ with DQL returns 400 errorCode 40012), while MCPVault cannot reach periodic notes or Obsidian commands at all."
+      },
+      {
+        "key": "goals",
+        "label": "Goal Definition",
+        "status": "ready",
+        "evidence": "Seven goals stated as pass/fail outcomes, each naming the artifact that changes: a config entry removed, a contract suite exit code, a specific resolved daily-note path, a refused cross-vault write, and a write that does not re-apply."
+      },
+      {
+        "key": "criteria",
+        "label": "Success Criteria",
+        "status": "ready",
+        "evidence": "All eleven criteria carry a runnable check, including two that guard against false greens: the contract suite asserts zero skipped tests so a silently-absent REST arm fails, and the cutover is verified by grepping the config rather than assumed."
+      },
+      {
+        "key": "scope",
+        "label": "Scope Boundaries",
+        "status": "ready",
+        "evidence": "Each of the 25 tools is assigned a specific backend (13 routed, 3 filesystem-only, 2 filesystem-native, 5 REST-only, 2 new routed), and out-of-scope names the /mcp transport, Dataview, weekly-and-longer periods, multi-vault, npm publishing, and upstream contribution."
+      },
+      {
+        "key": "consistency",
+        "label": "Consistency",
+        "status": "ready",
+        "evidence": "Five tensions resolved on the record: always-open reality versus the headless driver, one-surface versus a 25-tool count, REST-preferred versus the three filesystem-only carve-outs, Dataview promised but unavailable, and a fingerprint guard whose original circuit-recovery trigger would never fire on an always-open Obsidian."
+      }
+    ]
+  },
+  "problem": [
+    "John runs two overlapping MCP servers against the same Obsidian vault. obsidian-jcos is the Python mcp-obsidian pinned to commit 4aac5c2, reaching the vault over the Local REST API plugin. MCPVault reaches vaults over the filesystem. Together they present roughly 29 tools, many of which do the same thing by different routes.",
+    "Each server can do something the other cannot, so neither can be dropped. MCPVault has no access to anything that only exists inside a running Obsidian: periodic note resolution, registered commands, the active file, or link-preserving moves. The Python server has that access but cannot work when Obsidian is closed, and one of its tools is already broken here. obsidian_get_recent_changes issues a Dataview DQL query, and the Dataview plugin is not installed in the jcOS vault, so that request returns 400 errorCode 40012 today.",
+    "A naive merge of the two approaches introduces a data-integrity hazard that neither server has alone. The Local REST API binds to whichever vault Obsidian currently has open, which is jcOS, confirmed by comparing its root listing against the filesystem. MCPVault binds to its vaultPath argument. Nothing connects the two, and the plugin exposes no vault identity on its status endpoint. A server launched against one vault while Obsidian holds another would read and write different vaults depending only on whether the app happened to be running, and write_note would land content in the wrong vault with no error. Because Obsidian is almost always open here, a guard that only revalidates after a connection failure would effectively never run, so the check must be time-based rather than failure-triggered."
+  ],
+  "goals": [
+    "Remove the obsidian-jcos entry from ~/.claude.json with no capability lost: all 13 of its tools have a working MCPVault equivalent verified against the live jcOS vault.",
+    "Every routed tool returns equivalent observable results whether REST or the filesystem served it, enforced by a shared contract suite that runs both arms in CI without a live Obsidian.",
+    "Daily note resolution works with Obsidian closed, deriving folder and format from Obsidian's own daily-notes configuration so the two cannot drift apart.",
+    "A REST backend bound to a different vault than the server's vaultPath can never serve a request, including a vault switch that happens while Obsidian stays running and no connection ever fails.",
+    "With OBSIDIAN_API_KEY unset, behavior is unchanged from today: the existing test suite passes without a single test file being edited.",
+    "A write whose outcome is unknown because Obsidian became unreachable mid-request never re-applies against the filesystem.",
+    "Capabilities that exist only inside a running Obsidian become reachable from MCPVault: registered commands, the active file, opening a note in the UI, and Obsidian's own query index."
+  ],
+  "successCriteria": [
+    {
+      "criterion": "Every one of the 13 obsidian-jcos tools maps to a MCPVault tool that is actually registered, so a rename or a missing registration fails the build rather than the mapping table agreeing with itself",
+      "check": "npm test -- src/backend/parity — exits 0, asserting each mapped target name appears in the ListTools response from createServer"
+    },
+    {
+      "criterion": "REST and filesystem backends satisfy the same behavioral contract for every routed operation, with both arms genuinely executed rather than one silently skipped",
+      "check": "npm test -- src/backend/contract --reporter=json — exits 0 with a non-zero passed count and zero skipped for both the rest and filesystem arms"
+    },
+    {
+      "criterion": "get_periodic_note('daily') derives its path from Obsidian's config rather than a duplicated setting, proving both the nested format string and the derivation itself",
+      "check": "npm test -- src/backend/filesystem/periodic — exits 0, resolving Daily_Notes/2026/07/2026-07-30.md for an injected date of 2026-07-30, and resolving a different path when the fixture vault's .obsidian/daily-notes.json format is changed"
+    },
+    {
+      "criterion": "A vault fingerprint mismatch disables REST and warns, at startup and on time-based revalidation with the connection healthy and no prior failure",
+      "check": "npm test -- src/backend/health — exits 0, including a case where the fingerprint changes mid-session with no transport failure and the next write is refused"
+    },
+    {
+      "criterion": "An unknown-state write failure surfaces an error and performs no filesystem write, while a never-sent failure does fall back",
+      "check": "npm test -- src/backend/routing — exits 0"
+    },
+    {
+      "criterion": "Existing behavior is unchanged when REST is disabled, and no pre-existing test was edited to make that true",
+      "check": "env -u OBSIDIAN_API_KEY npm test — exits 0; and git diff --stat main -- 'src/**/*.test.ts' — shows no changes to the 9 pre-existing test files"
+    },
+    {
+      "criterion": "The package compiles on the supported Node matrix",
+      "check": "npm run build — exits 0"
+    },
+    {
+      "criterion": "TLS relaxation is confined to the REST client's own agent and never set process-wide",
+      "check": "grep -rn NODE_TLS_REJECT_UNAUTHORIZED src/ server.ts scripts/ — returns no matches; and grep -rn rejectUnauthorized src/backend/rest/ — matches only inside the https.Agent construction"
+    },
+    {
+      "criterion": "Every Python-server equivalent works against the live jcOS vault before the config entry is deleted",
+      "check": "npx tsx scripts/parity-smoke.ts — exits 0 and prints 13 PASS lines, exits non-zero if any mapping fails"
+    },
+    {
+      "criterion": "The cutover actually happened: obsidian-jcos is gone and MCPVault serves jcOS in its place",
+      "check": "grep -c obsidian-jcos ~/.claude.json — returns 0; and grep -n mcpvault ~/.claude.json — shows the local dist path with the five OBSIDIAN_ env vars"
+    },
+    {
+      "criterion": "The backend benchmark runs and reports both backends, leaving the responsiveness judgment to a human rather than to a flaky threshold",
+      "check": "npx tsx scripts/backend-bench.ts — exits 0 and prints REST and filesystem timings for read_note, write_note, and list_directory"
+    }
+  ],
+  "scope": {
+    "mvp": [
+      {
+        "item": "VaultBackend interface with a three-variant BackendFailure taxonomy",
+        "reason": "Routing switches on exactly three cases (never-sent, unknown-state, unsupported-by-this-backend); capping the taxonomy stops variants accumulating that no branch reads"
+      },
+      {
+        "item": "FileSystemBackend as an adapter over the existing FileSystemService",
+        "reason": "Adapting rather than rewriting keeps the 110 existing filesystem tests valid and untouched"
+      },
+      {
+        "item": "RestClient built on node:https with a scoped Agent",
+        "reason": "Node's global fetch ignores an https.Agent, so TLS relaxation cannot be scoped through it; node:https gives agent control with no new dependency"
+      },
+      {
+        "item": "In-repo REST test double (node:http fixture server)",
+        "reason": "The repo has no HTTP client and no mocking library, and CI runs on ubuntu with no Obsidian; without a double the REST arm of the contract suite cannot run in CI at all"
+      },
+      {
+        "item": "RestBackend for the 13 routed tools: read_note, read_multiple_notes, get_notes_info, write_note, patch_note, delete_note, move_note, move_file, list_directory, get_frontmatter, update_frontmatter, manage_tags, list_all_tags",
+        "reason": "Each is either path-scoped or has a direct single-call endpoint where REST observably differs: richer note payloads, structural heading and block patching, link-preserving MOVE, and GET /tags/ backed by Obsidian's index"
+      },
+      {
+        "item": "search_notes, get_vault_stats, and wiki_link stay filesystem-only",
+        "reason": "search_notes would change result sets based on whether Obsidian is open; the other two are whole-vault derivations that REST could only serve as N calls re-deriving an identical answer"
+      },
+      {
+        "item": "Vault fingerprint guard with time-based revalidation",
+        "reason": "Compares the sorted set of root-level .md filenames from GET /vault/ against readdir, which is comparable across both sources unlike full listings; revalidating on a TTL rather than on connection recovery is the only way the guard fires on an always-open Obsidian"
+      },
+      {
+        "item": "Reachability flag rather than a half-open circuit breaker",
+        "reason": "Obsidian closed means an immediate ECONNREFUSED on localhost, so a boolean plus a last-checked timestamp covers it without timing windows or a constant nobody tunes"
+      },
+      {
+        "item": "Five-variable configuration with explicit defaults and a documented plugin version floor",
+        "reason": "This vault serves HTTPS on 27123 with the insecure server disabled, inverting the usual convention, so a baked-in 27124 default would fail silently into permanent fallback; BRAT is installed so plugin versions move on their own"
+      },
+      {
+        "item": "Shared backend contract test suite",
+        "reason": "Load-bearing precisely because Obsidian is almost always open, so the filesystem branch would otherwise go untested until the one outage that needs it"
+      },
+      {
+        "item": "get_periodic_note, routed, with the config reader bypassing PathFilter entirely",
+        "reason": "Reading daily-notes.json through a hardcoded relative path inside the resolver leaves PathFilter and its 51 tests untouched, instead of adding an allowlist mechanism to a deliberately closed boundary"
+      },
+      {
+        "item": "Date resolution limited to YYYY, MM, and DD with a named error on any other token",
+        "reason": "Only daily is reachable, and the live format uses only those tokens; an unsupported format must fail loudly rather than silently resolve a wrong path"
+      },
+      {
+        "item": "get_document_map, routed",
+        "reason": "Derived from the note payload REST already returns, so routing it costs one mapping rather than a second fetch"
+      },
+      {
+        "item": "get_recent_changes, filesystem-native, reusing the existing vault scan",
+        "reason": "FileSystemService already walks and sorts by mtime for get_vault_stats; this adds a days filter and a higher cap rather than a second walker, and fixes a tool that is broken in this vault today"
+      },
+      {
+        "item": "get_recent_periodic_notes, filesystem-native",
+        "reason": "Closes the last parity gap against obsidian-jcos and works headless"
+      },
+      {
+        "item": "list_commands, execute_command, get_active_file, open_file, search_vault_advanced",
+        "reason": "Delivers goal 7; each has no filesystem equivalent and fails closed with a clear error when Obsidian is unreachable"
+      },
+      {
+        "item": "Parity mapping test and live smoke script",
+        "reason": "Retirement of obsidian-jcos was made conditional on parity, so parity needs a check rather than a feeling"
+      },
+      {
+        "item": "Backend benchmark script",
+        "reason": "Gives visibility into REST versus filesystem cost on the hot path without putting a wall-clock assertion into CI"
+      },
+      {
+        "item": "Cut ~/.claude.json over to the local build, carrying the five OBSIDIAN_ values across before deleting obsidian-jcos",
+        "reason": "That entry is the only place those values live, so deleting it first would lose the API key"
+      }
+    ],
+    "full": [],
+    "stretch": [],
+    "outOfScope": [
+      {
+        "item": "Using the plugin's own /mcp endpoint as the transport",
+        "reason": "REST has a stable OpenAPI spec, returns richer note payloads in one response, and needs no session handshake; the MCP endpoint offers no capability REST lacks"
+      },
+      {
+        "item": "Dataview DQL queries in search_vault_advanced",
+        "reason": "The Dataview plugin is not installed in jcOS; the endpoint returns 400 errorCode 40012, so advertising it would ship a broken path"
+      },
+      {
+        "item": "Weekly, monthly, quarterly, and yearly periodic note resolution",
+        "reason": "The periodic-notes community plugin is absent, so weekly returns 404 and the rest return 400; the tool accepts all five periods but only daily can work today"
+      },
+      {
+        "item": "Multi-vault support beyond jcOS",
+        "reason": "Obsidian serves one vault at a time, so a second instance would be filesystem-only anyway; scoping to jcOS keeps the fingerprint guard simple"
+      },
+      {
+        "item": "Routing search_notes, get_vault_stats, or wiki_link through REST",
+        "reason": "One would change result sets based on whether the app is open; the other two are whole-vault walks REST could only serve as N calls for an identical answer"
+      },
+      {
+        "item": "p95 latency assertions in the test suite",
+        "reason": "This repo already tuned a wall-clock test from 100ms to 200ms for CI stability and then deleted it; a benchmark script gives the visibility without the flake"
+      },
+      {
+        "item": "npm publishing under a personal scope",
+        "reason": "The config points at a local build path, so publishing adds a release step per change with no benefit at one machine"
+      },
+      {
+        "item": "Upstream contribution to bitbonsai/mcpvault",
+        "reason": "Explicitly chosen as a fork-local feature branch"
+      }
+    ],
+    "future": [
+      "Install the periodic-notes plugin to unlock weekly, monthly, quarterly, and yearly resolution, which the tool already accepts",
+      "Install Dataview to unlock DQL queries in search_vault_advanced and richer recent-changes queries",
+      "Extract a shared test-helper module; the mkdtemp setup block is currently duplicated in every stateful test file",
+      "Revisit upstream contribution if the backend seam proves stable and rebases stay cheap"
+    ]
+  },
+  "execution": {
+    "strategy": "Sequential",
+    "phases": [
+      {
+        "title": "Backend seam and filesystem adapter",
+        "risk": "low",
+        "blocking": true,
+        "specPath": "docs/ideation/mcpvault-rest-backend/spec-phase-1.md",
+        "notes": "Define the VaultBackend interface and the three-variant BackendFailure taxonomy, then adapt the existing FileSystemService behind it and switch the tool handlers in createServer.ts to call the backend. The existing suite is a weak regression check here: only 15 of 245 tests go through createServer, and the 110 filesystem tests construct the service directly, so this phase adds handler-level tests through createServer for every routed operation."
+      },
+      {
+        "title": "REST client, backend, and test double",
+        "risk": "medium",
+        "blocking": true,
+        "prereqs": ["Backend seam and filesystem adapter"],
+        "specPath": "docs/ideation/mcpvault-rest-backend/spec-phase-2.md",
+        "notes": "Greenfield HTTP on node:https with a scoped Agent, auth, and the classification separating never-sent from unknown-state failures. RestBackend maps the 13 routed operations onto REST endpoints including the WebDAV-style MOVE verb. Ships the node:http fixture server that lets the REST arm run in CI, which phase 3 depends on."
+      },
+      {
+        "title": "Routing, reachability, and vault fingerprint guard",
+        "risk": "high",
+        "blocking": true,
+        "prereqs": ["REST client, backend, and test double"],
+        "specPath": "docs/ideation/mcpvault-rest-backend/spec-phase-3.md",
+        "notes": "The phase that can corrupt data if wrong. REST-preferred routing, the read and write fallback asymmetry, the reachability flag, and the fingerprint comparison on root-level .md filenames with TTL revalidation so a vault switch is caught while Obsidian stays up. The shared contract suite lands here and runs both arms against the fixture server."
+      },
+      {
+        "title": "New tools",
+        "risk": "low",
+        "blocking": false,
+        "prereqs": ["Routing, reachability, and vault fingerprint guard"],
+        "specPath": "docs/ideation/mcpvault-rest-backend/spec-phase-4.md",
+        "notes": "Nine additive tools on a proven seam: two routed (get_periodic_note, get_document_map), two filesystem-native reusing the existing vault scan (get_recent_changes, get_recent_periodic_notes), five REST-only. Includes the YYYY/MM/DD resolver and the config reader that bypasses PathFilter with a hardcoded path."
+      },
+      {
+        "title": "Parity verification and cutover",
+        "kind": "gate",
+        "risk": "medium",
+        "blocking": true,
+        "prereqs": ["New tools"],
+        "specPath": "docs/ideation/mcpvault-rest-backend/spec-phase-5.md",
+        "notes": "Human checkpoint requiring a running Obsidian on jcOS. Parity mapping test, live smoke across all 13 equivalents, benchmark run, then copy the five OBSIDIAN_ values into a new mcpvault entry, confirm one live REST call succeeds, and only then delete obsidian-jcos."
+      }
+    ]
+  }
+}

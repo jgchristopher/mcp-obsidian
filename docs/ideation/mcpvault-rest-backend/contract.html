@@ -1,0 +1,1523 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MCPVault REST Backend — Mission Brief</title>
+    <script>
+      // Apply a saved forced theme before first paint to avoid a flash
+      try {
+        const saved = localStorage.getItem('ideation-contract-theme');
+        if (saved === 'light' || saved === 'dark')
+          document.documentElement.dataset.theme = saved;
+      } catch {}
+    </script>
+    <style>
+/* Command Deck — Contract Design Tokens & Components
+   Dark-first instrument panel with a co-equal light deck.
+   Cyan-teal telemetry accent; go/caution/danger status trio.
+   Inlined into generated HTML by contract-gen.ts at runtime.
+
+   Anchors: Linear (dark density + restraint), Grafana panels
+   (status rails, dense data), flight-telemetry go/no-go boards.
+   Explicitly NOT: neon glow, scanlines, fake terminal chrome. */
+
+:root {
+  /* Auto: follow the system. The header toggle forces a deck by setting
+     data-theme, which pins color-scheme and resolves every light-dark(). */
+  color-scheme: light dark;
+
+  /* ── Tokens: light-dark(light deck, dark deck) ──
+     OKLCH-derived, hued toward the cyan accent (~h230).
+     Dark deck is canonical; the light deck is co-equal, AA-verified. */
+  --bg: light-dark(#eef1f4, #0a0f16);
+  --surface-1: light-dark(#f9fafb, #101723);
+  --surface-2: light-dark(#ffffff, #161f2e);
+  --line: light-dark(#d4dce3, #243140);
+  --line-strong: light-dark(#aab8c4, #38485a);
+  --ink: light-dark(#16202b, #e6edf3);
+  --muted: light-dark(#46545f, #a2b2c2);
+  --faint: light-dark(#5b6b7a, #8295a8);
+
+  --accent: light-dark(#0a6d89, #56c8ea);
+  --accent-down: light-dark(#0a5e76, #3ba8c9);
+  --accent-tint: light-dark(#ddeef4, #11313f);
+
+  --go: light-dark(#137455, #46d49c);
+  --caution: light-dark(#8c6000, #e9b65a);
+  --danger: light-dark(#b62b50, #f5839b);
+  --go-tint: light-dark(#dff3ea, #0d2b21);
+  --caution-tint: light-dark(#f6ecd4, #2e2410);
+  --danger-tint: light-dark(#fae3e9, #331620);
+
+  /* ── Type ──────────────────────────────────────
+     Mono carries structure (headers, labels, data);
+     sans carries prose. Fixed rem scale, product register. */
+  --font-mono:
+    'Berkeley Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, Consolas,
+    monospace;
+  --font-sans:
+    system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial,
+    sans-serif;
+  --text-label: 0.6875rem; /* 11px mono labels   */
+  --text-meta: 0.75rem; /*    12px mono metadata */
+  --text-data: 0.8125rem; /*  13px mono data     */
+  --text-body: 1rem; /*       16px sans prose    */
+  --text-title: 1.25rem; /*   20px panel moments */
+  --text-display: 2.5rem; /*  40px project name  */
+
+  /* ── Space (4pt base) ─────────────────────────── */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --s7: 48px;
+  --s8: 64px;
+
+  --radius: 6px;
+  --radius-lg: 10px;
+}
+
+/* ── Forced themes (header toggle) ──────────────── */
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+/* ── Reset ──────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: 1.65;
+  /* light-on-dark compensation: +letter-spacing, raised line-height */
+  letter-spacing: 0.011em;
+  color: var(--ink);
+  background: var(--bg);
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: var(--s6) var(--s6) var(--s8);
+  -webkit-font-smoothing: antialiased;
+  font-kerning: normal;
+}
+
+/* ── Shared voices ──────────────────────────────── */
+
+.label {
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.label-accent {
+  color: var(--accent);
+}
+.label-danger {
+  color: var(--danger);
+}
+.mono-meta {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Status indicator: glyph + color, never color alone */
+.status-ind {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+.status-go {
+  color: var(--go);
+}
+.status-caution {
+  color: var(--caution);
+}
+
+/* ── Deck header ────────────────────────────────── */
+
+.deck-header {
+  padding-bottom: var(--s5);
+  border-bottom: 2px solid var(--line-strong);
+  margin-bottom: var(--s6);
+}
+.deck-id {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s5);
+}
+.deck-slug {
+  margin-bottom: var(--s3);
+}
+.deck-title {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  color: var(--ink);
+  text-wrap: balance;
+}
+.deck-meta {
+  text-align: right;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  align-items: flex-end;
+}
+.deck-meta .mono-meta {
+  line-height: 1.5;
+}
+.theme-toggle {
+  position: relative;
+  background: transparent;
+  color: var(--faint);
+  border: 1px solid var(--line);
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  cursor: pointer;
+  margin-top: var(--s1);
+}
+/* expand hit area to ~44px without growing the visual */
+.theme-toggle::after {
+  content: '';
+  position: absolute;
+  inset: -9px;
+}
+.theme-toggle:hover {
+  color: var(--accent);
+  border-color: var(--line-strong);
+}
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Gate strip: go/no-go board */
+.gate-strip {
+  margin-top: var(--s5);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface-1);
+}
+.gate-cell {
+  padding: var(--s3) var(--s4);
+  border-inline-start: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--s1) var(--s3);
+  align-items: baseline;
+}
+.gate-cell:first-child {
+  border-inline-start: 0;
+}
+.gate-mark {
+  font-family: var(--font-mono);
+  font-size: var(--text-data);
+  font-weight: 700;
+  grid-row: span 2;
+}
+.gate-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.gate-evidence {
+  grid-column: 2;
+  font-size: var(--text-meta);
+  font-family: var(--font-sans);
+  letter-spacing: 0.011em;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.gate-verdict {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin-top: var(--s3);
+}
+
+/* ── Panels & sections ──────────────────────────── */
+
+.section {
+  margin-top: var(--s7);
+}
+.section-hdr {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s4);
+  margin-bottom: var(--s4);
+}
+.section-hdr .label {
+  flex: 0 0 auto;
+}
+.section-hdr-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+  align-self: center;
+}
+.section-count {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  letter-spacing: 0.05em;
+  color: var(--faint);
+}
+.panel {
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s6);
+}
+
+/* ── Prose (problem statement) ──────────────────── */
+
+.prose {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  max-width: 68ch;
+}
+.prose p {
+  margin: 0;
+  font-size: var(--text-body);
+  line-height: 1.65;
+  color: var(--ink);
+}
+.line-num {
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  color: var(--faint);
+  margin-right: var(--s2);
+  letter-spacing: 0.08em;
+  vertical-align: 0.12em;
+}
+
+/* ── Goals ──────────────────────────────────────── */
+
+.goal-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.goal-row {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  align-items: baseline;
+}
+.goal-num {
+  font-family: var(--font-mono);
+  font-size: var(--text-title);
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.goal-text {
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+/* ── Success criteria ───────────────────────────── */
+
+.criteria-grid {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 var(--s6);
+}
+.criteria-item {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: var(--s3);
+  align-items: baseline;
+  padding: var(--s3) 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+.criteria-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.criteria-check {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  line-height: 1.5;
+  color: var(--accent);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  padding: var(--s1) var(--s2);
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+  align-self: flex-start;
+}
+.criteria-judgment {
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--caution);
+  font-weight: 600;
+}
+
+/* ── Scope ──────────────────────────────────────── */
+
+.scope-layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: var(--s6);
+}
+.nested-tiers {
+  position: relative;
+  width: 300px;
+  height: 300px;
+}
+.tier-box {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: var(--radius);
+}
+.tier-box-stretch {
+  width: 300px;
+  height: 300px;
+  border: 1px dashed var(--line-strong);
+}
+.tier-box-full {
+  width: 218px;
+  height: 218px;
+  border: 1px solid var(--accent-down);
+}
+.tier-box-mvp {
+  width: 136px;
+  height: 136px;
+  background: var(--accent-tint);
+  border: 1px solid var(--accent);
+}
+.tier-box-label {
+  position: absolute;
+  top: var(--s2);
+  left: var(--s3);
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.tier-box-stretch .tier-box-label {
+  color: var(--faint);
+}
+.tier-box-full .tier-box-label {
+  color: var(--accent);
+}
+.tier-box-mvp .tier-box-label {
+  color: var(--accent);
+}
+.tier-lists {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+}
+.tier-header {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s2);
+}
+.tier-glyph {
+  font-family: var(--font-mono);
+  font-size: var(--text-data);
+  font-weight: 700;
+  color: var(--accent);
+}
+.tier-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.tier-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.tier-count {
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  color: var(--faint);
+}
+.tier-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.tier-items li {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.tier-items strong {
+  font-weight: 500;
+}
+.tier-reason {
+  color: var(--muted);
+  margin-left: var(--s2);
+  font-size: 0.8125rem;
+}
+.scope-extras {
+  margin-top: var(--s5);
+}
+.scope-panel {
+  padding: var(--s4);
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface-1);
+}
+.scope-panel-out {
+  background: var(--danger-tint);
+}
+.scope-panel .label {
+  display: block;
+  margin-bottom: var(--s3);
+}
+.scope-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.scope-list li {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.scope-out-item {
+  color: var(--ink);
+  font-weight: 500;
+  text-decoration: line-through;
+  text-decoration-color: var(--danger);
+}
+
+/* ── Pipeline (DAG) ─────────────────────────────── */
+
+.pipeline-wrap {
+  padding: var(--s5);
+  overflow-x: auto;
+}
+.pipeline {
+  display: block;
+  min-width: 560px;
+  max-width: 100%;
+  height: auto;
+}
+.pipeline .node-box {
+  fill: var(--surface-2);
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+.pipeline .node-gate .node-box {
+  fill: var(--accent-tint);
+  stroke: var(--accent-down);
+}
+.pipeline .node-rail {
+  stroke-width: 3;
+}
+.pipeline .node-num {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  fill: var(--faint);
+  letter-spacing: 0.08em;
+}
+.pipeline .node-title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  fill: var(--ink);
+}
+.pipeline .node-kind {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  fill: var(--faint);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.pipeline .edge {
+  stroke: var(--line-strong);
+  stroke-width: 1.5;
+  fill: none;
+}
+.pipeline .edge-head {
+  fill: var(--line-strong);
+}
+
+/* ── Phase table ────────────────────────────────── */
+
+.phase-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-data);
+}
+.phase-table th {
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--faint);
+  text-align: left;
+  padding: var(--s2) var(--s4);
+  border-bottom: 1px solid var(--line-strong);
+}
+.phase-table td {
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--line);
+  vertical-align: baseline;
+}
+.phase-table tr:last-child td {
+  border-bottom: 0;
+}
+.phase-num {
+  font-family: var(--font-mono);
+  color: var(--faint);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.phase-title {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--ink);
+}
+.phase-kind {
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.phase-risk {
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.phase-notes {
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  letter-spacing: 0.011em;
+  color: var(--muted);
+  line-height: 1.5;
+  max-width: 52ch;
+}
+
+/* ── Commands ───────────────────────────────────── */
+
+.run-bar {
+  margin-top: var(--s5);
+  padding: var(--s5);
+  border: 1px solid var(--accent-down);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) minmax(280px, 1.4fr);
+  gap: var(--s5);
+  align-items: center;
+}
+.run-bar-headline {
+  font-family: var(--font-mono);
+  font-size: var(--text-title);
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  margin: var(--s1) 0;
+}
+.run-bar-desc {
+  font-size: 0.8125rem;
+  letter-spacing: 0.011em;
+  color: var(--muted);
+  line-height: 1.5;
+  max-width: 52ch;
+}
+.cmd-field {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: var(--text-data);
+  line-height: 1.4;
+  color: var(--ink);
+}
+.cmd-field-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: all;
+}
+.cmd-field-wide {
+  white-space: pre-wrap;
+}
+.cmd-field-wide .cmd-field-text {
+  white-space: pre-wrap;
+}
+.copy-btn {
+  position: relative;
+  flex: 0 0 auto;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--line-strong);
+  padding: var(--s1) var(--s3);
+  border-radius: 4px;
+  font-size: var(--text-label);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+/* expand hit area to ~44px without growing the visual */
+.copy-btn::after {
+  content: '';
+  position: absolute;
+  inset: -9px;
+}
+.copy-btn:hover {
+  background: var(--accent-tint);
+  border-color: var(--accent-down);
+}
+.copy-btn:active {
+  color: var(--accent-down);
+}
+.copy-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.cmd-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.cmd-row {
+  display: grid;
+  grid-template-columns: 36px 220px 1fr;
+  gap: var(--s4);
+  align-items: center;
+}
+.cmd-row-num {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  color: var(--faint);
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+.cmd-row-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-data);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* ── Disclosure ─────────────────────────────────── */
+
+.disclosure {
+  margin-top: var(--s5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface-1);
+}
+.disclosure summary {
+  list-style: none;
+  cursor: pointer;
+  padding: var(--s3) var(--s4);
+  font-family: var(--font-mono);
+  font-size: var(--text-data);
+  font-weight: 600;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+.disclosure summary:hover {
+  color: var(--ink);
+}
+.disclosure summary::-webkit-details-marker {
+  display: none;
+}
+.disclosure summary::before {
+  content: '▸';
+  color: var(--faint);
+  transition: transform 0.15s ease;
+}
+.disclosure[open] summary::before {
+  transform: rotate(90deg);
+}
+.disclosure summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.disclosure-body {
+  padding: var(--s4);
+  border-top: 1px solid var(--line);
+}
+
+/* ── First move / approval / close bands ────────── */
+
+.approval-bar {
+  margin-top: var(--s5);
+  padding: var(--s5);
+  border: 1px solid var(--caution);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+.approval-desc {
+  font-size: 0.8125rem;
+  letter-spacing: 0.011em;
+  color: var(--muted);
+  line-height: 1.5;
+  margin-top: var(--s2);
+  max-width: 64ch;
+}
+.plan-placeholder {
+  color: var(--muted);
+  font-style: italic;
+}
+.contract-close {
+  margin-top: var(--s7);
+  padding: var(--s5);
+  border: 1px solid var(--line-strong);
+  border-top: 2px solid var(--go);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--s5);
+  align-items: center;
+}
+.close-headline {
+  font-family: var(--font-mono);
+  font-size: var(--text-title);
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  margin-top: var(--s2);
+}
+.close-desc {
+  font-size: 0.8125rem;
+  letter-spacing: 0.011em;
+  color: var(--muted);
+  line-height: 1.5;
+  margin-top: var(--s2);
+  max-width: 60ch;
+}
+.close-meta {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  align-items: flex-end;
+}
+
+/* ── Responsive ─────────────────────────────────── */
+
+@media (max-width: 820px) {
+  body {
+    padding: var(--s4) var(--s4) var(--s7);
+  }
+  .deck-id {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .deck-meta {
+    text-align: left;
+    align-items: flex-start;
+  }
+  .deck-title {
+    font-size: 1.75rem;
+  }
+  .gate-cell {
+    border-inline-start: 0;
+    border-top: 1px solid var(--line);
+  }
+  .gate-cell:first-child {
+    border-top: 0;
+  }
+  .two-col,
+  .scope-layout,
+  .scope-extras,
+  .run-bar,
+  .contract-close {
+    grid-template-columns: 1fr;
+  }
+  .close-meta {
+    text-align: left;
+    align-items: flex-start;
+  }
+  .criteria-grid {
+    grid-template-columns: 1fr;
+  }
+  .nested-tiers {
+    display: none;
+  }
+  .cmd-row {
+    grid-template-columns: 36px 1fr;
+  }
+  .cmd-row .cmd-field {
+    grid-column: 1 / -1;
+  }
+  .phase-notes-col {
+    display: none;
+  }
+}
+
+/* ── Reduced motion ─────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .disclosure summary::before {
+    transition: none;
+  }
+}
+
+/* ── Print: the deck renders as a paper document ── */
+
+@media print {
+  /* Paper always wins, even when the toggle forced the dark deck */
+  :root,
+  :root[data-theme] {
+    color-scheme: light;
+  }
+  :root {
+    --bg: #ffffff;
+    --surface-1: #ffffff;
+    --surface-2: #f4f6f8;
+    --line: #c9d2da;
+    --line-strong: #8d9aa6;
+    --ink: #000000;
+    --muted: #333d46;
+    --faint: #4d5a66;
+    --accent: #0a5e76;
+    --accent-down: #0a5e76;
+    --accent-tint: #e8f2f6;
+    --go: #0d5c43;
+    --caution: #6e4b00;
+    --danger: #9c2547;
+  }
+  body {
+    font-size: 11pt;
+    max-width: none;
+    padding: 20px;
+  }
+  .copy-btn,
+  .theme-toggle {
+    display: none !important;
+  }
+  .pipeline-wrap {
+    overflow: visible;
+  }
+  .disclosure:not([open]) > *:not(summary) {
+    display: block !important;
+  }
+  .disclosure summary::before {
+    display: none;
+  }
+  .panel,
+  .goal-row,
+  .gate-strip,
+  .run-bar,
+  .contract-close {
+    page-break-inside: avoid;
+  }
+}
+
+/* ── Review status (PO round-trip) ───────────────── */
+
+.review-banner {
+  margin-left: 0.6em;
+  padding: 0.1em 0.5em;
+  border-radius: 0.3em;
+  background: var(--caution);
+  color: #000;
+  font-size: 0.8em;
+}
+
+    </style>
+  </head>
+  <body data-contract-status="Approved">
+
+    <header class="deck-header">
+      <div class="deck-id">
+        <div>
+          <div class="deck-slug label">mission brief · mcpvault-rest-backend</div>
+          <h1 class="deck-title">MCPVault REST Backend</h1>
+        </div>
+        <div class="deck-meta">
+          <span class="status-ind status-go"><span class="status-dot" aria-hidden="true"></span>Approved</span>
+          <span class="mono-meta">created 2026-07-30</span>
+          
+          
+          <button type="button" class="theme-toggle" id="theme-toggle">theme · auto</button>
+          
+        </div>
+      </div>
+
+      <div class="gate-verdict">
+        <span class="label">Readiness gates</span>
+        <span class="status-ind status-go">All gates ready</span>
+      </div>
+      <div class="gate-strip">
+        <div class="gate-cell">
+          <span class="gate-mark" style="color: var(--go)">✓</span>
+          <span class="gate-name">Problem Clarity</span>
+          <span class="gate-evidence">Verified against the live setup: obsidian-jcos runs a pinned Python server whose get_recent_changes is broken because Dataview is absent (POST /search/ with DQL returns 400 errorCode 40012), while MCPVault cannot reach periodic notes or Obsidian commands at all.</span>
+        </div>
+        <div class="gate-cell">
+          <span class="gate-mark" style="color: var(--go)">✓</span>
+          <span class="gate-name">Goal Definition</span>
+          <span class="gate-evidence">Seven goals stated as pass/fail outcomes, each naming the artifact that changes: a config entry removed, a contract suite exit code, a specific resolved daily-note path, a refused cross-vault write, and a write that does not re-apply.</span>
+        </div>
+        <div class="gate-cell">
+          <span class="gate-mark" style="color: var(--go)">✓</span>
+          <span class="gate-name">Success Criteria</span>
+          <span class="gate-evidence">All eleven criteria carry a runnable check, including two that guard against false greens: the contract suite asserts zero skipped tests so a silently-absent REST arm fails, and the cutover is verified by grepping the config rather than assumed.</span>
+        </div>
+        <div class="gate-cell">
+          <span class="gate-mark" style="color: var(--go)">✓</span>
+          <span class="gate-name">Scope Boundaries</span>
+          <span class="gate-evidence">Each of the 25 tools is assigned a specific backend (13 routed, 3 filesystem-only, 2 filesystem-native, 5 REST-only, 2 new routed), and out-of-scope names the /mcp transport, Dataview, weekly-and-longer periods, multi-vault, npm publishing, and upstream contribution.</span>
+        </div>
+        <div class="gate-cell">
+          <span class="gate-mark" style="color: var(--go)">✓</span>
+          <span class="gate-name">Consistency</span>
+          <span class="gate-evidence">Five tensions resolved on the record: always-open reality versus the headless driver, one-surface versus a 25-tool count, REST-preferred versus the three filesystem-only carve-outs, Dataview promised but unavailable, and a fingerprint guard whose original circuit-recovery trigger would never fire on an always-open Obsidian.</span>
+        </div>
+      </div>
+    </header>
+    <main>
+
+    <section class="run-bar">
+      <div>
+        <div class="label label-accent">First move</div>
+        <div class="run-bar-headline">Run this.</div>
+        <div class="run-bar-desc">Phase 01 of 05 — <strong>Backend seam and filesystem adapter</strong></div>
+      </div>
+      <div class="cmd-field">
+            <span class="cmd-field-text" id="cmd-first">/ideation:execute-spec docs/ideation/mcpvault-rest-backend/spec-phase-1.md</span>
+            <button type="button" class="copy-btn" data-copy="cmd-first">copy</button>
+          </div>
+    </section>
+
+    <div class="section two-col">
+      <section>
+      <div class="section-hdr">
+        <span class="label">The problem</span>
+        <span class="section-hdr-rule"></span>
+      </div>
+        <div class="prose">
+          <p><span class="line-num">01</span>John runs two overlapping MCP servers against the same Obsidian vault. obsidian-jcos is the Python mcp-obsidian pinned to commit 4aac5c2, reaching the vault over the Local REST API plugin. MCPVault reaches vaults over the filesystem. Together they present roughly 29 tools, many of which do the same thing by different routes.</p>
+          <p><span class="line-num">02</span>Each server can do something the other cannot, so neither can be dropped. MCPVault has no access to anything that only exists inside a running Obsidian: periodic note resolution, registered commands, the active file, or link-preserving moves. The Python server has that access but cannot work when Obsidian is closed, and one of its tools is already broken here. obsidian_get_recent_changes issues a Dataview DQL query, and the Dataview plugin is not installed in the jcOS vault, so that request returns 400 errorCode 40012 today.</p>
+          <p><span class="line-num">03</span>A naive merge of the two approaches introduces a data-integrity hazard that neither server has alone. The Local REST API binds to whichever vault Obsidian currently has open, which is jcOS, confirmed by comparing its root listing against the filesystem. MCPVault binds to its vaultPath argument. Nothing connects the two, and the plugin exposes no vault identity on its status endpoint. A server launched against one vault while Obsidian holds another would read and write different vaults depending only on whether the app happened to be running, and write_note would land content in the wrong vault with no error. Because Obsidian is almost always open here, a guard that only revalidates after a connection failure would effectively never run, so the check must be time-based rather than failure-triggered.</p>
+        </div>
+      </section>
+      <section>
+      <div class="section-hdr">
+        <span class="label">Goals</span>
+        <span class="section-hdr-rule"></span>
+        <span class="section-count">×7</span>
+      </div>
+        <div class="goal-list">
+          <div class="goal-row">
+            <span class="goal-num">01</span>
+            <span class="goal-text">Remove the obsidian-jcos entry from ~/.claude.json with no capability lost: all 13 of its tools have a working MCPVault equivalent verified against the live jcOS vault.</span>
+          </div>
+          <div class="goal-row">
+            <span class="goal-num">02</span>
+            <span class="goal-text">Every routed tool returns equivalent observable results whether REST or the filesystem served it, enforced by a shared contract suite that runs both arms in CI without a live Obsidian.</span>
+          </div>
+          <div class="goal-row">
+            <span class="goal-num">03</span>
+            <span class="goal-text">Daily note resolution works with Obsidian closed, deriving folder and format from Obsidian's own daily-notes configuration so the two cannot drift apart.</span>
+          </div>
+          <div class="goal-row">
+            <span class="goal-num">04</span>
+            <span class="goal-text">A REST backend bound to a different vault than the server's vaultPath can never serve a request, including a vault switch that happens while Obsidian stays running and no connection ever fails.</span>
+          </div>
+          <div class="goal-row">
+            <span class="goal-num">05</span>
+            <span class="goal-text">With OBSIDIAN_API_KEY unset, behavior is unchanged from today: the existing test suite passes without a single test file being edited.</span>
+          </div>
+          <div class="goal-row">
+            <span class="goal-num">06</span>
+            <span class="goal-text">A write whose outcome is unknown because Obsidian became unreachable mid-request never re-applies against the filesystem.</span>
+          </div>
+          <div class="goal-row">
+            <span class="goal-num">07</span>
+            <span class="goal-text">Capabilities that exist only inside a running Obsidian become reachable from MCPVault: registered commands, the active file, opening a note in the UI, and Obsidian's own query index.</span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section class="section">
+      <div class="section-hdr">
+        <span class="label">Done when</span>
+        <span class="section-hdr-rule"></span>
+        <span class="section-count">11 signals · all mechanically checked</span>
+      </div>
+      <ul class="criteria-grid">
+        <li class="criteria-item">
+          <span class="line-num">01</span>
+          <div class="criteria-body">
+            <span>Every one of the 13 obsidian-jcos tools maps to a MCPVault tool that is actually registered, so a rename or a missing registration fails the build rather than the mapping table agreeing with itself</span>
+            <code class="criteria-check">npm test -- src/backend/parity — exits 0, asserting each mapped target name appears in the ListTools response from createServer</code>
+          </div>
+        </li>
+        <li class="criteria-item">
+          <span class="line-num">02</span>
+          <div class="criteria-body">
+            <span>REST and filesystem backends satisfy the same behavioral contract for every routed operation, with both arms genuinely executed rather than one silently skipped</span>
+            <code class="criteria-check">npm test -- src/backend/contract --reporter=json — exits 0 with a non-zero passed count and zero skipped for both the rest and filesystem arms</code>
+          </div>
+        </li>
+        <li class="criteria-item">
+          <span class="line-num">03</span>
+          <div class="criteria-body">
+            <span>get_periodic_note('daily') derives its path from Obsidian's config rather than a duplicated setting, proving both the nested format string and the derivation itself</span>
+            <code class="criteria-check">npm test -- src/backend/filesystem/periodic — exits 0, resolving Daily_Notes/2026/07/2026-07-30.md for an injected date of 2026-07-30, and resolving a different path when the fixture vault's .obsidian/daily-notes.json format is changed</code>
+          </div>
+        </li>
+        <li class="criteria-item">
+          <span class="line-num">04</span>
+          <div class="criteria-body">
+            <span>A vault fingerprint mismatch disables REST and warns, at startup and on time-based revalidation with the connection healthy and no prior failure</span>
+            <code class="criteria-check">npm test -- src/backend/health — exits 0, including a case where the fingerprint changes mid-session with no transport failure and the next write is refused</code>
+          </div>
+        </li>
+        <li class="criteria-item">
+          <span class="line-num">05</span>
+          <div class="criteria-body">
+            <span>An unknown-state write failure surfaces an error and performs no filesystem write, while a never-sent failure does fall back</span>
+            <code class="criteria-check">npm test -- src/backend/routing — exits 0</code>
+          </div>
+        </li>
+        <li class="criteria-item">
+          <span class="line-num">06</span>
+          <div class="criteria-body">
+            <span>Existing behavior is unchanged when REST is disabled, and no pre-existing test was edited to make that true</span>
+            <code class="criteria-check">env -u OBSIDIAN_API_KEY npm test — exits 0; and git diff --stat main -- 'src/**/*.test.ts' — shows no changes to the 9 pre-existing test files</code>
+          </div>
+        </li>
+        <li class="criteria-item">
+          <span class="line-num">07</span>
+          <div class="criteria-body">
+            <span>The package compiles on the supported Node matrix</span>
+            <code class="criteria-check">npm run build — exits 0</code>
+          </div>
+        </li>
+        <li class="criteria-item">
+          <span class="line-num">08</span>
+          <div class="criteria-body">
+            <span>TLS relaxation is confined to the REST client's own agent and never set process-wide</span>
+            <code class="criteria-check">grep -rn NODE_TLS_REJECT_UNAUTHORIZED src/ server.ts scripts/ — returns no matches; and grep -rn rejectUnauthorized src/backend/rest/ — matches only inside the https.Agent construction</code>
+          </div>
+        </li>
+        <li class="criteria-item">
+          <span class="line-num">09</span>
+          <div class="criteria-body">
+            <span>Every Python-server equivalent works against the live jcOS vault before the config entry is deleted</span>
+            <code class="criteria-check">npx tsx scripts/parity-smoke.ts — exits 0 and prints 13 PASS lines, exits non-zero if any mapping fails</code>
+          </div>
+        </li>
+        <li class="criteria-item">
+          <span class="line-num">10</span>
+          <div class="criteria-body">
+            <span>The cutover actually happened: obsidian-jcos is gone and MCPVault serves jcOS in its place</span>
+            <code class="criteria-check">grep -c obsidian-jcos ~/.claude.json — returns 0; and grep -n mcpvault ~/.claude.json — shows the local dist path with the five OBSIDIAN_ env vars</code>
+          </div>
+        </li>
+        <li class="criteria-item">
+          <span class="line-num">11</span>
+          <div class="criteria-body">
+            <span>The backend benchmark runs and reports both backends, leaving the responsiveness judgment to a human rather than to a flaky threshold</span>
+            <code class="criteria-check">npx tsx scripts/backend-bench.ts — exits 0 and prints REST and filesystem timings for read_note, write_note, and list_directory</code>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <section class="section">
+      <div class="section-hdr">
+        <span class="label">Scope</span>
+        <span class="section-hdr-rule"></span>
+        <span class="section-count">MVP nests inside Full nests inside Stretch</span>
+      </div>
+      <div class="scope-layout">
+        <div class="nested-tiers" aria-hidden="true">
+          <div class="tier-box tier-box-stretch"><span class="tier-box-label">Stretch ×0</span></div>
+          <div class="tier-box tier-box-full"><span class="tier-box-label">Full ×0</span></div>
+          <div class="tier-box tier-box-mvp"><span class="tier-box-label">MVP ×19</span></div>
+        </div>
+        <div class="tier-lists">
+
+          <div class="tier-group">
+            <div class="tier-header">
+              <span class="tier-title">MVP — must ship</span>
+              <span class="tier-rule"></span>
+              <span class="tier-count">×19</span>
+            </div>
+            <ul class="tier-items">
+              <li><strong>VaultBackend interface with a three-variant BackendFailure taxonomy</strong><span class="tier-reason">— Routing switches on exactly three cases (never-sent, unknown-state, unsupported-by-this-backend); capping the taxonomy stops variants accumulating that no branch reads</span></li>
+              <li><strong>FileSystemBackend as an adapter over the existing FileSystemService</strong><span class="tier-reason">— Adapting rather than rewriting keeps the 110 existing filesystem tests valid and untouched</span></li>
+              <li><strong>RestClient built on node:https with a scoped Agent</strong><span class="tier-reason">— Node's global fetch ignores an https.Agent, so TLS relaxation cannot be scoped through it; node:https gives agent control with no new dependency</span></li>
+              <li><strong>In-repo REST test double (node:http fixture server)</strong><span class="tier-reason">— The repo has no HTTP client and no mocking library, and CI runs on ubuntu with no Obsidian; without a double the REST arm of the contract suite cannot run in CI at all</span></li>
+              <li><strong>RestBackend for the 13 routed tools: read_note, read_multiple_notes, get_notes_info, write_note, patch_note, delete_note, move_note, move_file, list_directory, get_frontmatter, update_frontmatter, manage_tags, list_all_tags</strong><span class="tier-reason">— Each is either path-scoped or has a direct single-call endpoint where REST observably differs: richer note payloads, structural heading and block patching, link-preserving MOVE, and GET /tags/ backed by Obsidian's index</span></li>
+              <li><strong>search_notes, get_vault_stats, and wiki_link stay filesystem-only</strong><span class="tier-reason">— search_notes would change result sets based on whether Obsidian is open; the other two are whole-vault derivations that REST could only serve as N calls re-deriving an identical answer</span></li>
+              <li><strong>Vault fingerprint guard with time-based revalidation</strong><span class="tier-reason">— Compares the sorted set of root-level .md filenames from GET /vault/ against readdir, which is comparable across both sources unlike full listings; revalidating on a TTL rather than on connection recovery is the only way the guard fires on an always-open Obsidian</span></li>
+              <li><strong>Reachability flag rather than a half-open circuit breaker</strong><span class="tier-reason">— Obsidian closed means an immediate ECONNREFUSED on localhost, so a boolean plus a last-checked timestamp covers it without timing windows or a constant nobody tunes</span></li>
+              <li><strong>Five-variable configuration with explicit defaults and a documented plugin version floor</strong><span class="tier-reason">— This vault serves HTTPS on 27123 with the insecure server disabled, inverting the usual convention, so a baked-in 27124 default would fail silently into permanent fallback; BRAT is installed so plugin versions move on their own</span></li>
+              <li><strong>Shared backend contract test suite</strong><span class="tier-reason">— Load-bearing precisely because Obsidian is almost always open, so the filesystem branch would otherwise go untested until the one outage that needs it</span></li>
+              <li><strong>get_periodic_note, routed, with the config reader bypassing PathFilter entirely</strong><span class="tier-reason">— Reading daily-notes.json through a hardcoded relative path inside the resolver leaves PathFilter and its 51 tests untouched, instead of adding an allowlist mechanism to a deliberately closed boundary</span></li>
+              <li><strong>Date resolution limited to YYYY, MM, and DD with a named error on any other token</strong><span class="tier-reason">— Only daily is reachable, and the live format uses only those tokens; an unsupported format must fail loudly rather than silently resolve a wrong path</span></li>
+              <li><strong>get_document_map, routed</strong><span class="tier-reason">— Derived from the note payload REST already returns, so routing it costs one mapping rather than a second fetch</span></li>
+              <li><strong>get_recent_changes, filesystem-native, reusing the existing vault scan</strong><span class="tier-reason">— FileSystemService already walks and sorts by mtime for get_vault_stats; this adds a days filter and a higher cap rather than a second walker, and fixes a tool that is broken in this vault today</span></li>
+              <li><strong>get_recent_periodic_notes, filesystem-native</strong><span class="tier-reason">— Closes the last parity gap against obsidian-jcos and works headless</span></li>
+              <li><strong>list_commands, execute_command, get_active_file, open_file, search_vault_advanced</strong><span class="tier-reason">— Delivers goal 7; each has no filesystem equivalent and fails closed with a clear error when Obsidian is unreachable</span></li>
+              <li><strong>Parity mapping test and live smoke script</strong><span class="tier-reason">— Retirement of obsidian-jcos was made conditional on parity, so parity needs a check rather than a feeling</span></li>
+              <li><strong>Backend benchmark script</strong><span class="tier-reason">— Gives visibility into REST versus filesystem cost on the hot path without putting a wall-clock assertion into CI</span></li>
+              <li><strong>Cut ~/.claude.json over to the local build, carrying the five OBSIDIAN_ values across before deleting obsidian-jcos</strong><span class="tier-reason">— That entry is the only place those values live, so deleting it first would lose the API key</span></li>
+            </ul>
+          </div>
+
+
+        </div>
+      </div>
+
+      <div class="two-col scope-extras">
+        <div class="scope-panel scope-panel-out">
+          <span class="label label-danger">Out of scope — said no on purpose</span>
+          <ul class="scope-list">
+            <li><span class="scope-out-item">Using the plugin's own /mcp endpoint as the transport</span> — REST has a stable OpenAPI spec, returns richer note payloads in one response, and needs no session handshake; the MCP endpoint offers no capability REST lacks</li>
+            <li><span class="scope-out-item">Dataview DQL queries in search_vault_advanced</span> — The Dataview plugin is not installed in jcOS; the endpoint returns 400 errorCode 40012, so advertising it would ship a broken path</li>
+            <li><span class="scope-out-item">Weekly, monthly, quarterly, and yearly periodic note resolution</span> — The periodic-notes community plugin is absent, so weekly returns 404 and the rest return 400; the tool accepts all five periods but only daily can work today</li>
+            <li><span class="scope-out-item">Multi-vault support beyond jcOS</span> — Obsidian serves one vault at a time, so a second instance would be filesystem-only anyway; scoping to jcOS keeps the fingerprint guard simple</li>
+            <li><span class="scope-out-item">Routing search_notes, get_vault_stats, or wiki_link through REST</span> — One would change result sets based on whether the app is open; the other two are whole-vault walks REST could only serve as N calls for an identical answer</li>
+            <li><span class="scope-out-item">p95 latency assertions in the test suite</span> — This repo already tuned a wall-clock test from 100ms to 200ms for CI stability and then deleted it; a benchmark script gives the visibility without the flake</li>
+            <li><span class="scope-out-item">npm publishing under a personal scope</span> — The config points at a local build path, so publishing adds a release step per change with no benefit at one machine</li>
+            <li><span class="scope-out-item">Upstream contribution to bitbonsai/mcpvault</span> — Explicitly chosen as a fork-local feature branch</li>
+          </ul>
+        </div>
+        <div class="scope-panel">
+          <span class="label">Future — someday, maybe</span>
+          <ul class="scope-list">
+            <li>Install the periodic-notes plugin to unlock weekly, monthly, quarterly, and yearly resolution, which the tool already accepts</li>
+            <li>Install Dataview to unlock DQL queries in search_vault_advanced and richer recent-changes queries</li>
+            <li>Extract a shared test-helper module; the mkdtemp setup block is currently duplicated in every stateful test file</li>
+            <li>Revisit upstream contribution if the backend seam proves stable and rebases stay cheap</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-hdr">
+        <span class="label">Execution</span>
+        <span class="section-hdr-rule"></span>
+        <span class="section-count">Sequential</span>
+      </div>
+      <div class="panel pipeline-wrap">
+        <svg class="pipeline" viewBox="0 0 1268 76" role="img" aria-label="Phase pipeline: 01 Backend seam and filesystem adapter (wave 1); 02 REST client, backend, and test double (wave 2); 03 Routing, reachability, and vault fingerprint guard (wave 3); 04 New tools (wave 4); 05 Parity verification and cutover (wave 5) — 5 waves">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path class="edge-head" d="M0,0 L10,5 L0,10 z" />
+            </marker>
+          </defs>
+      <path class="edge" d="M 206 38 H 263" marker-end="url(#arrow)" />
+      <path class="edge" d="M 470 38 H 527" marker-end="url(#arrow)" />
+      <path class="edge" d="M 734 38 H 791" marker-end="url(#arrow)" />
+      <path class="edge" d="M 998 38 H 1055" marker-end="url(#arrow)" />
+      <g class="node">
+        <rect class="node-box" x="6" y="6" width="200" height="64" rx="5" />
+        <line class="node-rail" x1="7" y1="7.5" x2="205" y2="7.5" stroke="var(--go)" />
+        <text class="node-num" x="18" y="28">01</text>
+        <text class="node-kind" x="194" y="28" text-anchor="end" fill="var(--go)">low</text>
+        <text class="node-title" x="18" y="47">Backend seam and filesyst…</text>
+        <text class="node-kind" x="18" y="62">phase · blocking</text>
+      </g>
+      <g class="node">
+        <rect class="node-box" x="270" y="6" width="200" height="64" rx="5" />
+        <line class="node-rail" x1="271" y1="7.5" x2="469" y2="7.5" stroke="var(--caution)" />
+        <text class="node-num" x="282" y="28">02</text>
+        <text class="node-kind" x="458" y="28" text-anchor="end" fill="var(--caution)">med</text>
+        <text class="node-title" x="282" y="47">REST client, backend, and…</text>
+        <text class="node-kind" x="282" y="62">phase · blocking</text>
+      </g>
+      <g class="node">
+        <rect class="node-box" x="534" y="6" width="200" height="64" rx="5" />
+        <line class="node-rail" x1="535" y1="7.5" x2="733" y2="7.5" stroke="var(--danger)" />
+        <text class="node-num" x="546" y="28">03</text>
+        <text class="node-kind" x="722" y="28" text-anchor="end" fill="var(--danger)">high</text>
+        <text class="node-title" x="546" y="47">Routing, reachability, an…</text>
+        <text class="node-kind" x="546" y="62">phase · blocking</text>
+      </g>
+      <g class="node">
+        <rect class="node-box" x="798" y="6" width="200" height="64" rx="5" />
+        <line class="node-rail" x1="799" y1="7.5" x2="997" y2="7.5" stroke="var(--go)" />
+        <text class="node-num" x="810" y="28">04</text>
+        <text class="node-kind" x="986" y="28" text-anchor="end" fill="var(--go)">low</text>
+        <text class="node-title" x="810" y="47">New tools</text>
+        <text class="node-kind" x="810" y="62">phase</text>
+      </g>
+      <g class="node node-gate">
+        <rect class="node-box" x="1062" y="6" width="200" height="64" rx="5" />
+        <line class="node-rail" x1="1063" y1="7.5" x2="1261" y2="7.5" stroke="var(--caution)" />
+        <text class="node-num" x="1074" y="28">05</text>
+        <text class="node-kind" x="1250" y="28" text-anchor="end" fill="var(--caution)">med</text>
+        <text class="node-title" x="1074" y="47">Parity verification and c…</text>
+        <text class="node-kind" x="1074" y="62">gate · blocking</text>
+      </g>
+        </svg>
+      </div>
+      <div class="panel">
+        <table class="phase-table">
+          <thead>
+            <tr>
+              <th scope="col">##</th>
+              <th scope="col">Phase</th>
+              <th scope="col">Kind</th>
+              <th scope="col">Risk</th>
+              <th scope="col" class="phase-notes-col">Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="phase-num">01</td>
+              <td class="phase-title">Backend seam and filesystem adapter</td>
+              <td class="phase-kind">phase · blocking</td>
+              <td class="phase-risk" style="color: var(--go)">low</td>
+              <td class="phase-notes phase-notes-col">Define the VaultBackend interface and the three-variant BackendFailure taxonomy, then adapt the existing FileSystemService behind it and switch the tool handlers in createServer.ts to call the backend. The existing suite is a weak regression check here: only 15 of 245 tests go through createServer, and the 110 filesystem tests construct the service directly, so this phase adds handler-level tests through createServer for every routed operation.</td>
+            </tr>
+            <tr>
+              <td class="phase-num">02</td>
+              <td class="phase-title">REST client, backend, and test double</td>
+              <td class="phase-kind">phase · blocking</td>
+              <td class="phase-risk" style="color: var(--caution)">med</td>
+              <td class="phase-notes phase-notes-col">Greenfield HTTP on node:https with a scoped Agent, auth, and the classification separating never-sent from unknown-state failures. RestBackend maps the 13 routed operations onto REST endpoints including the WebDAV-style MOVE verb. Ships the node:http fixture server that lets the REST arm run in CI, which phase 3 depends on.</td>
+            </tr>
+            <tr>
+              <td class="phase-num">03</td>
+              <td class="phase-title">Routing, reachability, and vault fingerprint guard</td>
+              <td class="phase-kind">phase · blocking</td>
+              <td class="phase-risk" style="color: var(--danger)">high</td>
+              <td class="phase-notes phase-notes-col">The phase that can corrupt data if wrong. REST-preferred routing, the read and write fallback asymmetry, the reachability flag, and the fingerprint comparison on root-level .md filenames with TTL revalidation so a vault switch is caught while Obsidian stays up. The shared contract suite lands here and runs both arms against the fixture server.</td>
+            </tr>
+            <tr>
+              <td class="phase-num">04</td>
+              <td class="phase-title">New tools</td>
+              <td class="phase-kind">phase</td>
+              <td class="phase-risk" style="color: var(--go)">low</td>
+              <td class="phase-notes phase-notes-col">Nine additive tools on a proven seam: two routed (get_periodic_note, get_document_map), two filesystem-native reusing the existing vault scan (get_recent_changes, get_recent_periodic_notes), five REST-only. Includes the YYYY/MM/DD resolver and the config reader that bypasses PathFilter with a hardcoded path.</td>
+            </tr>
+            <tr>
+              <td class="phase-num">05</td>
+              <td class="phase-title">Parity verification and cutover</td>
+              <td class="phase-kind">gate · blocking</td>
+              <td class="phase-risk" style="color: var(--caution)">med</td>
+              <td class="phase-notes phase-notes-col">Human checkpoint requiring a running Obsidian on jcOS. Parity mapping test, live smoke across all 13 equivalents, benchmark run, then copy the five OBSIDIAN_ values into a new mcpvault entry, confirm one live REST call succeeds, and only then delete obsidian-jcos.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="run-bar">
+        <div>
+          <div class="label label-accent">Run all phases</div>
+          <div class="run-bar-headline">Autopilot.</div>
+          <div class="run-bar-desc">Reads the contract, walks the dependency graph, and dispatches phases automatically.</div>
+        </div>
+        <div class="cmd-field">
+            <span class="cmd-field-text" id="cmd-autopilot">/ideation:autopilot</span>
+            <button type="button" class="copy-btn" data-copy="cmd-autopilot">copy</button>
+          </div>
+      </div>
+
+      <details class="disclosure">
+        <summary>Run phases individually (5)</summary>
+        <div class="disclosure-body">
+          <div class="cmd-list">
+            <div class="cmd-row">
+              <span class="cmd-row-num">01</span>
+              <span class="cmd-row-title">Backend seam and filesystem adapter</span>
+              <div class="cmd-field">
+            <span class="cmd-field-text" id="cmd-1">/ideation:execute-spec docs/ideation/mcpvault-rest-backend/spec-phase-1.md</span>
+            <button type="button" class="copy-btn" data-copy="cmd-1">copy</button>
+          </div>
+            </div>
+            <div class="cmd-row">
+              <span class="cmd-row-num">02</span>
+              <span class="cmd-row-title">REST client, backend, and test double</span>
+              <div class="cmd-field">
+            <span class="cmd-field-text" id="cmd-2">/ideation:execute-spec docs/ideation/mcpvault-rest-backend/spec-phase-2.md</span>
+            <button type="button" class="copy-btn" data-copy="cmd-2">copy</button>
+          </div>
+            </div>
+            <div class="cmd-row">
+              <span class="cmd-row-num">03</span>
+              <span class="cmd-row-title">Routing, reachability, and vault fingerprint guard</span>
+              <div class="cmd-field">
+            <span class="cmd-field-text" id="cmd-3">/ideation:execute-spec docs/ideation/mcpvault-rest-backend/spec-phase-3.md</span>
+            <button type="button" class="copy-btn" data-copy="cmd-3">copy</button>
+          </div>
+            </div>
+            <div class="cmd-row">
+              <span class="cmd-row-num">04</span>
+              <span class="cmd-row-title">New tools</span>
+              <div class="cmd-field">
+            <span class="cmd-field-text" id="cmd-4">/ideation:execute-spec docs/ideation/mcpvault-rest-backend/spec-phase-4.md</span>
+            <button type="button" class="copy-btn" data-copy="cmd-4">copy</button>
+          </div>
+            </div>
+            <div class="cmd-row">
+              <span class="cmd-row-num">05</span>
+              <span class="cmd-row-title">Parity verification and cutover</span>
+              <div class="cmd-field">
+            <span class="cmd-field-text" id="cmd-5"># Review: docs/ideation/mcpvault-rest-backend/spec-phase-5.md</span>
+            <button type="button" class="copy-btn" data-copy="cmd-5">copy</button>
+          </div>
+            </div>
+          </div>
+        </div>
+      </details>
+
+    </section>
+
+    <section class="contract-close">
+      <div>
+        <div class="label label-accent">Contract approved</div>
+        <div class="close-headline">This plan is the commitment.</div>
+        <div class="close-desc">5 phases · Sequential. Scope changes mean a new revision that supersedes this brief — not silent drift.</div>
+      </div>
+      <div class="close-meta">
+        <span class="status-ind status-go"><span class="status-dot" aria-hidden="true"></span>Approved</span>
+        <span class="mono-meta">2026-07-30</span>
+      </div>
+    </section>
+    </main>
+
+    <script>
+      document.querySelectorAll('.copy-btn').forEach(btn => {
+        // aria-live so the copied/failed text swap is announced
+        btn.setAttribute('aria-live', 'polite');
+        btn.addEventListener('click', () => {
+          const target = document.getElementById(btn.dataset.copy);
+          if (!target) return;
+          const flash = label => {
+            btn.textContent = label;
+            setTimeout(() => (btn.textContent = 'copy'), 2000);
+          };
+          navigator.clipboard
+            .writeText(target.textContent.trim())
+            .then(() => flash('copied'))
+            // file:// or denied permission — the text is select-all, so
+            // point at the manual path instead of failing silently
+            .catch(() => flash('press ⌘C / Ctrl+C'));
+        });
+      });
+
+      /* === THEME TOGGLE (auto → light → dark) === */
+      const themeBtn = document.getElementById('theme-toggle');
+      if (themeBtn) {
+        const KEY = 'ideation-contract-theme';
+        const root = document.documentElement;
+        const apply = mode => {
+          if (mode === 'auto') delete root.dataset.theme;
+          else root.dataset.theme = mode;
+          themeBtn.textContent = 'theme · ' + mode;
+          try {
+            if (mode === 'auto') localStorage.removeItem(KEY);
+            else localStorage.setItem(KEY, mode);
+          } catch {}
+        };
+        apply(root.dataset.theme || 'auto');
+        themeBtn.addEventListener('click', () => {
+          const order = ['auto', 'light', 'dark'];
+          const current = root.dataset.theme || 'auto';
+          apply(order[(order.indexOf(current) + 1) % order.length]);
+        });
+      }
+    </script>
+  </body>
+</html>
