@@ -3,6 +3,8 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { FileSystemBackend } from "./backend/filesystem/index.js";
+import type { VaultBackend } from "./backend/types.js";
 import { FileSystemService } from "./filesystem.js";
 import { FrontmatterHandler, parseFrontmatter } from "./frontmatter.js";
 import { PathFilter } from "./pathfilter.js";
@@ -15,6 +17,16 @@ export interface CreateServerOptions {
   version?: string;
   pathFilter?: PathFilter;
   frontmatterHandler?: FrontmatterHandler;
+  /**
+   * Serves the routed tools. Defaults to a `FileSystemBackend` over the same
+   * `FileSystemService` the unrouted tools use, so omitting it keeps today's
+   * behavior exactly. Phase 3 injects a router here.
+   *
+   * Explicitly `| undefined` because `exactOptionalPropertyTypes` is on and a
+   * caller passing `backend: undefined` must land on the default, not a type
+   * error.
+   */
+  backend?: VaultBackend | undefined;
 }
 
 export function createServer(vaultPath: string, options: CreateServerOptions = {}): Server {
@@ -26,8 +38,10 @@ export function createServer(vaultPath: string, options: CreateServerOptions = {
   } = options;
 
   const resolvedVaultPath = resolve(vaultPath);
+  // `fileSystem` still serves get_vault_stats and wiki_link directly. Do not remove it.
   const fileSystem = new FileSystemService(resolvedVaultPath, pathFilter, frontmatterHandler);
   const searchService = new SearchService(resolvedVaultPath, pathFilter);
+  const backend = options.backend ?? new FileSystemBackend(fileSystem);
 
   const server = new Server({ name, version }, {
     capabilities: { tools: {} },
@@ -261,7 +275,7 @@ export function createServer(vaultPath: string, options: CreateServerOptions = {
     try {
       switch (toolName) {
         case "read_note": {
-          const note = await fileSystem.readNote(trimmedArgs.path);
+          const note = await backend.readNote(trimmedArgs.path);
           const indent = trimmedArgs.prettyPrint ? 2 : undefined;
           return {
             content: [{ type: "text", text: JSON.stringify({ fm: note.frontmatter, content: note.content }, null, indent) }]
@@ -270,7 +284,7 @@ export function createServer(vaultPath: string, options: CreateServerOptions = {
 
         case "write_note": {
           const fm = parseFrontmatter(trimmedArgs.frontmatter);
-          await fileSystem.writeNote({
+          await backend.writeNote({
             path: trimmedArgs.path,
             content: trimmedArgs.content,
             ...(fm !== undefined && { frontmatter: fm }),
@@ -282,7 +296,7 @@ export function createServer(vaultPath: string, options: CreateServerOptions = {
         }
 
         case "patch_note": {
-          const result = await fileSystem.patchNote({
+          const result = await backend.patchNote({
             path: trimmedArgs.path,
             oldString: trimmedArgs.oldString,
             newString: trimmedArgs.newString,
@@ -295,7 +309,7 @@ export function createServer(vaultPath: string, options: CreateServerOptions = {
         }
 
         case "list_directory": {
-          const listing = await fileSystem.listDirectory(trimmedArgs.path || '');
+          const listing = await backend.listDirectory(trimmedArgs.path || '');
           const indent = trimmedArgs.prettyPrint ? 2 : undefined;
           return {
             content: [{ type: "text", text: JSON.stringify({ dirs: listing.directories, files: listing.files }, null, indent) }]
@@ -303,7 +317,7 @@ export function createServer(vaultPath: string, options: CreateServerOptions = {
         }
 
         case "delete_note": {
-          const result = await fileSystem.deleteNote({
+          const result = await backend.deleteNote({
             path: trimmedArgs.path,
             confirmPath: trimmedArgs.confirmPath,
             trashMode: trimmedArgs.trashMode
@@ -331,7 +345,7 @@ export function createServer(vaultPath: string, options: CreateServerOptions = {
         }
 
         case "move_note": {
-          const result = await fileSystem.moveNote({
+          const result = await backend.moveNote({
             oldPath: trimmedArgs.oldPath,
             newPath: trimmedArgs.newPath,
             overwrite: trimmedArgs.overwrite
@@ -343,7 +357,7 @@ export function createServer(vaultPath: string, options: CreateServerOptions = {
         }
 
         case "move_file": {
-          const result = await fileSystem.moveFile({
+          const result = await backend.moveFile({
             oldPath: trimmedArgs.oldPath,
             newPath: trimmedArgs.newPath,
             confirmOldPath: trimmedArgs.confirmOldPath,
@@ -357,7 +371,7 @@ export function createServer(vaultPath: string, options: CreateServerOptions = {
         }
 
         case "read_multiple_notes": {
-          const result = await fileSystem.readMultipleNotes({
+          const result = await backend.readMultipleNotes({
             paths: trimmedArgs.paths,
             includeContent: trimmedArgs.includeContent,
             includeFrontmatter: trimmedArgs.includeFrontmatter
@@ -373,7 +387,7 @@ export function createServer(vaultPath: string, options: CreateServerOptions = {
           if (!fm) {
             throw new Error('frontmatter is required');
           }
-          await fileSystem.updateFrontmatter({
+          await backend.updateFrontmatter({
             path: trimmedArgs.path,
             frontmatter: fm,
             merge: trimmedArgs.merge
@@ -384,7 +398,7 @@ export function createServer(vaultPath: string, options: CreateServerOptions = {
         }
 
         case "get_notes_info": {
-          const result = await fileSystem.getNotesInfo(trimmedArgs.paths);
+          const result = await backend.getNotesInfo(trimmedArgs.paths);
           const indent = trimmedArgs.prettyPrint ? 2 : undefined;
           return {
             content: [{ type: "text", text: JSON.stringify(result, null, indent) }]
@@ -392,15 +406,15 @@ export function createServer(vaultPath: string, options: CreateServerOptions = {
         }
 
         case "get_frontmatter": {
-          const note = await fileSystem.readNote(trimmedArgs.path);
+          const fm = await backend.getFrontmatter(trimmedArgs.path);
           const indent = trimmedArgs.prettyPrint ? 2 : undefined;
           return {
-            content: [{ type: "text", text: JSON.stringify(note.frontmatter, null, indent) }]
+            content: [{ type: "text", text: JSON.stringify(fm, null, indent) }]
           };
         }
 
         case "manage_tags": {
-          const result = await fileSystem.manageTags({
+          const result = await backend.manageTags({
             path: trimmedArgs.path,
             operation: trimmedArgs.operation,
             tags: trimmedArgs.tags
@@ -421,7 +435,7 @@ export function createServer(vaultPath: string, options: CreateServerOptions = {
         }
 
         case "list_all_tags": {
-          const tags = await fileSystem.listAllTags();
+          const tags = await backend.listAllTags();
           const indent = trimmedArgs.prettyPrint ? 2 : undefined;
           return {
             content: [{ type: "text", text: JSON.stringify(tags, null, indent) }]

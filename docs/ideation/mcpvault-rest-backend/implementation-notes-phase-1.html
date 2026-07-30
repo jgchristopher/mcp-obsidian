@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Implementation Notes — Phase 1</title>
+    <style>
+      :root {
+        --color-bg: #ffffff;
+        --color-surface: #f8f9fa;
+        --color-border: #dee2e6;
+        --color-text: #212529;
+        --color-text-muted: #6c757d;
+
+        --color-accent: #4361ee;
+        --color-accent-bg: #eef0ff;
+
+        --color-success: #2d6a4f;
+        --color-success-bg: #d8f3dc;
+
+        --color-danger: #9b2226;
+        --color-danger-bg: #fde8e8;
+
+        --color-warning: #b45309;
+        --color-warning-bg: #fef3c7;
+
+        --font-sans:
+          system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+          sans-serif;
+        --font-mono:
+          'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', Menlo, Consolas,
+          monospace;
+
+        --space-1: 4px;
+        --space-2: 8px;
+        --space-3: 16px;
+        --space-4: 24px;
+        --space-5: 32px;
+        --space-6: 48px;
+
+        --radius-sm: 4px;
+        --radius-md: 8px;
+        --radius-lg: 12px;
+
+        --max-width: 900px;
+        --sidebar-width: 220px;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        [data-theme='auto'] {
+          --color-bg: #1a1a2e;
+          --color-surface: #16213e;
+          --color-border: #2a2a4a;
+          --color-text: #e0e0e0;
+          --color-text-muted: #a0a0b0;
+
+          --color-accent: #6c83f7;
+          --color-accent-bg: #1e2a4a;
+
+          --color-success: #4ade80;
+          --color-success-bg: #14352a;
+
+          --color-danger: #f87171;
+          --color-danger-bg: #3a1818;
+
+          --color-warning: #fbbf24;
+          --color-warning-bg: #3a2a08;
+        }
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: var(--font-sans);
+        font-size: 16px;
+        line-height: 1.6;
+        color: var(--color-text);
+        background: var(--color-bg);
+        max-width: var(--max-width);
+        margin: 0 auto;
+        padding: var(--space-5) var(--space-4);
+      }
+
+      .doc-header {
+        border-bottom: 1px solid var(--color-border);
+        padding-bottom: var(--space-3);
+        margin-bottom: var(--space-5);
+      }
+
+      .doc-header h1 {
+        margin: 0 0 var(--space-1) 0;
+        font-size: 28px;
+        line-height: 1.25;
+      }
+
+      .doc-meta {
+        color: var(--color-text-muted);
+        font-size: 14px;
+        margin: 0;
+      }
+
+      .doc-content h2 {
+        margin-top: var(--space-6);
+        padding-bottom: var(--space-2);
+        border-bottom: 1px solid var(--color-border);
+        font-size: 22px;
+      }
+
+      .doc-content h3 {
+        margin-top: var(--space-5);
+        font-size: 18px;
+      }
+
+      .doc-content p,
+      .doc-content li,
+      .doc-content dd {
+        font-size: 15px;
+      }
+
+      code {
+        font-family: var(--font-mono);
+        font-size: 0.9em;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        padding: 1px 4px;
+      }
+
+      .note-entry {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-left: 3px solid var(--color-accent);
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-4);
+        margin-bottom: var(--space-4);
+      }
+
+      .note-entry h3 {
+        margin-top: 0;
+      }
+
+      .note-entry dt {
+        font-weight: 600;
+        color: var(--color-text-muted);
+        font-size: 13px;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        margin-top: var(--space-3);
+      }
+
+      .note-entry dd {
+        margin: var(--space-1) 0 0 0;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="doc-header">
+      <h1>Implementation Notes — Phase 1</h1>
+      <p class="doc-meta">MCPVault REST Backend · 2026-07-30 · Backend seam and filesystem adapter</p>
+    </header>
+    <main class="doc-content">
+      <section class="note-entry">
+        <h3>VaultBackend interface — four signatures do not match FileSystemService</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec's Open Items say "None. All interface members map to existing
+            <code>FileSystemService</code> methods." Four do not.
+            <code>writeNote</code> and <code>updateFrontmatter</code> return
+            <code>Promise&lt;void&gt;</code> in the service, not
+            <code>{ success, path, message }</code>. <code>listAllTags</code> returns
+            <code>{ tag, count }</code>, not <code>{ name, count }</code>. And there is no
+            <code>getFrontmatter</code> method at all.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            The interface was written to match the service. Contract goal 5 forbids editing any
+            pre-existing test file, and the filesystem behavior is what phase 3's contract suite
+            holds both backends to, so the filesystem shapes are authoritative. The spec also
+            demands deep-equality tests between the adapter and the raw service, which is only
+            satisfiable if the adapter returns the service result unchanged. Phase 2's REST
+            backend maps <code>GET /tags/</code>'s <code>{ name, count }</code> onto
+            <code>{ tag, count }</code> on its side.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Keep the spec's literal signatures and have the adapter synthesize result objects and
+            rename tag keys. Rejected: that is translation, it breaks the deep-equality check the
+            spec asks for, and the <code>{ name, count }</code> shape would change
+            <code>list_all_tags</code> output for every existing caller.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>FileSystemBackend.getFrontmatter — the one method with logic in it</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            <code>getFrontmatter</code> is in the routed set and in the interface, but
+            <code>FileSystemService</code> has no such method. The
+            <code>get_frontmatter</code> handler previously called
+            <code>readNote(path).frontmatter</code> inline.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            The adapter reproduces exactly that: read the note, return its
+            <code>frontmatter</code>. The projection moved from the handler into the adapter, so
+            the observable response is unchanged and phase 2 can serve the same operation from one
+            REST call.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Leave <code>get_frontmatter</code> unrouted. Rejected: the spec and the contract both
+            list it among the 13 routed tools, and phase 2 maps it to
+            <code>GET /vault/{path}</code>.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>Handler tests live in a new file, not in createServer.test.ts</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec's File Changes table says to add the handler-level tests to
+            <code>src/createServer.test.ts</code>. Its own Validation Commands then require
+            <code>git diff --stat main -- 'src/**/*.test.ts'</code> to show no changes to the nine
+            pre-existing test files, which contract goal 5 also demands. Both cannot hold.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            The tests went into a new file, <code>src/createServer.routing.test.ts</code>. It is
+            picked up by the vitest <code>src/**/*.test.ts</code> include and by the spec's own
+            check command <code>npm test -- src/createServer</code>, so the coverage deliverable
+            lands while the no-edit gate stays clean.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Edit <code>createServer.test.ts</code> and accept the gate failure. Rejected: the gate
+            is a hard, machine-checked contract criterion; the file name is not.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>CreateServerOptions.backend is typed <code>VaultBackend | undefined</code></h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec's snippet declares <code>backend?: VaultBackend</code>, while its Error
+            Handling table requires a caller passing <code>backend: undefined</code> to land on
+            the default. The repo compiles with <code>exactOptionalPropertyTypes: true</code>, so
+            the optional-only form makes the documented call a type error.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Declared <code>backend?: VaultBackend | undefined</code>, with a test asserting the
+            explicit-undefined call still writes through the default adapter.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Keep the narrow type and cast in the test. Rejected: that hides the contradiction
+            rather than resolving it, and phase 3 builds the backend conditionally.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>src/index.ts re-exports the backend types</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec's File Changes table lists only <code>createServer.ts</code> as modified.
+            But <code>CreateServerOptions</code> is exported from the package entry and now has a
+            <code>backend</code> member typed <code>VaultBackend</code>, and the package
+            <code>exports</code> map exposes only <code>"."</code>, so a consumer could not name
+            that type.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Added <code>VaultBackend</code>, <code>BackendFailure</code>,
+            <code>BackendError</code>, and <code>FileSystemBackend</code> to
+            <code>src/index.ts</code>. Purely additive and inert at runtime.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Leave the entry point alone and let consumers deep-import
+            <code>dist/src/backend/types.js</code>. Rejected: the exports map blocks it.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>Review ran as validation-only</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            <code>execute-spec</code> calls for an <code>ideation:reviewer</code> subagent pass
+            before commit. No agent-dispatch tool was available in this execution environment.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Fell back to the skill's documented validation-only mode: full typecheck including
+            test files, the full 309-test suite, <code>npm run build</code>, and a deliberate
+            mutation check that reverted two routed cases to <code>fileSystem</code> and confirmed
+            the new tests fail. A human reviewer pass is still worth running on this diff.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>Skip the commit until a reviewer is available. Rejected: the phase is behaviorally
+          inert and fully revertible, and blocking here stalls the whole chain.</dd>
+        </dl>
+      </section>
+    </main>
+  </body>
+</html>
