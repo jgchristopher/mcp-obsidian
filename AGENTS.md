@@ -17,6 +17,9 @@ npm start /path/vault  # Run server locally with tsx
 npm test -- path/to/test.test.ts
 npm test -- -t "test name pattern"
 
+# Live REST tests (skipped unless the key is set — see "Local REST API backend")
+OBSIDIAN_API_KEY=… OBSIDIAN_VAULT_PATH=/path/to/vault npm test -- src/backend/rest/live
+
 # Publishing
 npm run publish:dry     # Dry run
 npm run publish:beta    # Publish with beta tag
@@ -42,6 +45,11 @@ src/
   search.ts            # SearchService — full-text search with token-optimized output
   uri.ts               # Obsidian URI generation
   types.ts             # All TypeScript interfaces
+  backend/             # VaultBackend seam (see "Local REST API backend")
+    types.ts           # VaultBackend interface, BackendFailure taxonomy
+    filesystem/        # FileSystemBackend — adapter over FileSystemService
+    rest/              # RestBackend, RestClient, config
+    testing/           # fixture-server.ts — in-process Local REST API double
   *.test.ts            # Co-located test files
 website/               # Astro 5 website (separate package, see website/AGENTS.md)
 ```
@@ -105,6 +113,40 @@ The `website/` directory is a separate Astro package. It serves content in two f
 
 When updating content, always update both. See `website/AGENTS.md` for full details and file mapping.
 
+## Local REST API backend
+
+`src/backend/` holds a `VaultBackend` seam so vault operations can be served by
+the filesystem or by the Obsidian Local REST API plugin. Nothing routes to REST
+yet; `createServer` still defaults to `FileSystemBackend`.
+
+### Environment variables
+
+| Variable | Default | Notes |
+|---|---|---|
+| `OBSIDIAN_API_KEY` | unset | **Unset disables REST entirely.** `resolveRestConfig()` returns `null` and behavior is identical to a build with no REST code |
+| `OBSIDIAN_HOST` | `127.0.0.1` | |
+| `OBSIDIAN_PORT` | `27123` | Not 27124 — see the trap below |
+| `OBSIDIAN_PROTOCOL` | `https` | |
+| `OBSIDIAN_VERIFY_SSL` | `false` | The plugin ships a self-signed certificate |
+| `OBSIDIAN_VAULT_PATH` | unset | Live tests only; the vault the running Obsidian has open |
+
+Names mirror the Python `mcp-obsidian` server exactly, so an existing MCP client
+entry migrates by copy-paste. A malformed port, protocol, or boolean throws at
+startup rather than defaulting: a typo should stop the server, not silently pin
+it to filesystem fallback.
+
+**Plugin version floor: >= 4.1.7**, read from `versions.self` in `GET /`. BRAT is
+in play on the target vault, so versions move without warning. A lower version
+warns and continues; it never refuses to start.
+
+### Conditional-skip idiom
+
+`src/backend/rest/live.test.ts` is the repo's first conditionally skipped suite:
+`describe.skipIf(!config)` gated on `OBSIDIAN_API_KEY`. It is a drift detector
+against a real Obsidian, never a substitute for the fixture-backed suite —
+nothing that proves backend equivalence may live behind the guard, because the
+phase 3 contract suite must report zero skips.
+
 ## Testing
 
 Vitest with globals enabled, node environment. Test files co-located as `*.test.ts`.
@@ -114,6 +156,9 @@ When writing tests:
 - Test path security (traversal, access denied)
 - Test frontmatter parsing edge cases
 - Use `Promise.allSettled` patterns for batch operations
+- REST-backed code tests against `src/backend/testing/fixture-server.ts`, an
+  in-process `node:http` double with injectable socket failures. CI has no
+  Obsidian, so anything gated on a live plugin proves nothing there.
 
 ## Security
 
@@ -137,3 +182,7 @@ When modifying file operations:
 - Claude Code discovers skills only under `.claude/skills/`; repo keeps them in `skills/`. Committed symlink `.claude/skills/triage -> ../../skills/triage` bridges it — same pattern for any new skill.
 - `pathFilter.isAllowed` + `normalizePath` must guard EVERY new tool's path input (PR #146 blocker: `readNoteLines` skipped them = read `.obsidian/` files). Mirror `readNote`'s guard block.
 - Outline/heading parsing must be fence-aware: `#` lines inside ``` blocks are not headings (`patch_note` has prior art).
+- The REST port default is **27123**, not the 27124 the plugin's OpenAPI document implies. Those are shipped defaults; the real ports come from the vault's plugin settings, and on jcOS HTTPS listens on 27123 with the insecure server disabled. A 27124 default fails every connection and looks exactly like "REST just never helps".
+- Never touch `NODE_TLS_REJECT_UNAUTHORIZED`. It disables certificate validation for every outbound request in the process. The plugin's self-signed cert is handled by `rejectUnauthorized` on `RestClient`'s own agent — the only permitted site (`grep -rn rejectUnauthorized src/backend/rest/`).
+- `RestClient` classifies transport failures on the request's `finish` event, never on `error.code`. `ETIMEDOUT` fires on both sides of the send boundary, and misreading a post-send timeout as `never-sent` is what duplicates an `append`. Node suppresses `finish` when the socket already errored, which is what makes the flag trustworthy.
+- Request timeouts use an explicit deadline timer, not `req.setTimeout`. Node arms the socket's idle timer only after `connect`, so a blackholed host would hang forever and the pre-send timeout would never fire.

@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Implementation Notes — Phase 2</title>
+    <style>
+      :root {
+        --color-bg: #ffffff;
+        --color-surface: #f8f9fa;
+        --color-border: #dee2e6;
+        --color-text: #212529;
+        --color-text-muted: #6c757d;
+
+        --color-accent: #4361ee;
+        --color-accent-bg: #eef0ff;
+
+        --color-success: #2d6a4f;
+        --color-success-bg: #d8f3dc;
+
+        --color-danger: #9b2226;
+        --color-danger-bg: #fde8e8;
+
+        --color-warning: #b45309;
+        --color-warning-bg: #fef3c7;
+
+        --font-sans:
+          system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+          sans-serif;
+        --font-mono:
+          'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', Menlo, Consolas,
+          monospace;
+
+        --space-1: 4px;
+        --space-2: 8px;
+        --space-3: 16px;
+        --space-4: 24px;
+        --space-5: 32px;
+        --space-6: 48px;
+
+        --radius-sm: 4px;
+        --radius-md: 8px;
+        --radius-lg: 12px;
+
+        --max-width: 900px;
+        --sidebar-width: 220px;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        [data-theme='auto'] {
+          --color-bg: #1a1a2e;
+          --color-surface: #16213e;
+          --color-border: #2a2a4a;
+          --color-text: #e0e0e0;
+          --color-text-muted: #a0a0b0;
+
+          --color-accent: #6c83f7;
+          --color-accent-bg: #1e2a4a;
+
+          --color-success: #4ade80;
+          --color-success-bg: #14352a;
+
+          --color-danger: #f87171;
+          --color-danger-bg: #3a1818;
+
+          --color-warning: #fbbf24;
+          --color-warning-bg: #3a2a08;
+        }
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: var(--font-sans);
+        font-size: 16px;
+        line-height: 1.6;
+        color: var(--color-text);
+        background: var(--color-bg);
+        max-width: var(--max-width);
+        margin: 0 auto;
+        padding: var(--space-5) var(--space-4);
+      }
+
+      .doc-header {
+        border-bottom: 1px solid var(--color-border);
+        padding-bottom: var(--space-3);
+        margin-bottom: var(--space-5);
+      }
+
+      .doc-header h1 {
+        margin: 0 0 var(--space-1) 0;
+        font-size: 28px;
+        line-height: 1.25;
+      }
+
+      .doc-meta {
+        color: var(--color-text-muted);
+        font-size: 14px;
+        margin: 0;
+      }
+
+      .doc-content h2 {
+        margin-top: var(--space-6);
+        padding-bottom: var(--space-2);
+        border-bottom: 1px solid var(--color-border);
+        font-size: 22px;
+      }
+
+      .doc-content h3 {
+        margin-top: var(--space-5);
+        font-size: 18px;
+      }
+
+      .doc-content p,
+      .doc-content li,
+      .doc-content dd {
+        font-size: 15px;
+      }
+
+      code {
+        font-family: var(--font-mono);
+        font-size: 0.9em;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        padding: 1px 4px;
+      }
+
+      .note-entry {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-left: 3px solid var(--color-accent);
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-4);
+        margin-bottom: var(--space-4);
+      }
+
+      .note-entry h3 {
+        margin-top: 0;
+      }
+
+      .note-entry dt {
+        font-weight: 600;
+        color: var(--color-text-muted);
+        font-size: 13px;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        margin-top: var(--space-3);
+      }
+
+      .note-entry dd {
+        margin: var(--space-1) 0 0 0;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="doc-header">
+      <h1>Implementation Notes — Phase 2</h1>
+      <p class="doc-meta">MCPVault REST Backend · 2026-07-30 · REST client, backend, and test double</p>
+    </header>
+    <main class="doc-content">
+      <section class="note-entry">
+        <h3>RestBackend — four operations do not use the endpoint the spec assigns them</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec's operation table maps <code>patchNote</code> to
+            <code>PATCH /vault/{path}</code> with <code>Operation</code>,
+            <code>Target-Type</code>, and <code>Target</code> headers, and
+            <code>updateFrontmatter</code> to <code>PATCH</code> with
+            <code>Target-Type: frontmatter</code>. Neither mapping can express what the tool
+            promises. MCPVault's <code>patch_note</code> is a whole-file find-and-replace with an
+            occurrence count that fails when a string matches twice; REST's PATCH targets a
+            heading, block, or frontmatter field and has no notion of either. REST's frontmatter
+            PATCH sets one field per request and cannot remove a field, so
+            <code>merge: false</code> and multi-key updates are inexpressible — and a
+            multi-request update is not atomic anyway.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            <code>patchNote</code>, <code>updateFrontmatter</code>, <code>manageTags</code>, and
+            the <code>append</code>/<code>prepend</code> write modes are read-modify-PUT, reusing
+            the same <code>FrontmatterHandler</code> the filesystem path uses. Phase 3's contract
+            suite asserts resulting vault state across both backends, so byte-identical output is
+            the binding requirement and only shared serialization delivers it. Noted as
+            non-atomic in the same breath the spec already concedes for <code>prepend</code>.
+            <code>append</code> joins it: <code>POST /vault/{path}</code> appends to the raw
+            file, while the filesystem appends to the <em>body</em> and merges frontmatter, so
+            the two produce different bytes on any note with a frontmatter block.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Follow the table literally and let phase 3's contract suite discover the divergence.
+            Rejected: the divergence is structural, not incidental, so it would surface as a
+            contract failure with no fix available inside phase 3 — and the fallback would be to
+            weaken the contract suite, which is the one thing that suite exists to prevent.
+            <code>MOVE</code>, <code>DELETE</code>, <code>GET /tags/</code>, the directory
+            listing, and the single-request note read are all kept, and those are where the real
+            wins are: <code>MOVE</code> preserves file history and rewrites inbound links, which
+            no filesystem rename can do.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>Request timeouts use an explicit deadline, not <code>req.setTimeout</code></h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec requires that a timeout <em>before</em> the request is flushed classify as
+            <code>never-sent</code>. Written with <code>req.setTimeout(ms)</code>, that test hung
+            for the full 10-second vitest limit and never produced a classification at all. Node's
+            <code>setSocketTimeout</code> defers arming the idle timer until the socket emits
+            <code>connect</code>, so a host that never completes a handshake — a blackholed
+            address, a sleeping machine — is never timed out.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            A plain <code>setTimeout</code> deadline covering the whole request, cleared on both
+            the resolve and reject paths, that calls <code>req.destroy(err)</code>. This is a
+            total deadline rather than an inactivity timeout, which is the stricter of the two and
+            appropriate for a loopback API where any honest response is milliseconds away. The
+            timer is <code>unref</code>'d so it can never hold the process open. Recorded in
+            AGENTS.md, since the failure mode is invisible: the naive version passes every test
+            that involves a server which actually accepts connections.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Pass <code>timeout</code> in the request options instead. Rejected — it routes through
+            the same <code>setSocketTimeout</code> and has the identical blind spot.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3><code>RestBackend</code> takes a vault path, not just a client</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            Phase 3's wiring snippet constructs <code>new RestBackend(new RestClient(config))</code>.
+            Two things make a one-argument constructor impossible.
+            <code>readMultipleNotes</code> and <code>getNotesInfo</code> return an
+            <code>obsidianUri</code> built from the absolute vault root, and path normalization has
+            to strip a vault-path prefix when a caller passes an absolute path by mistake — which
+            <code>FileSystemService</code> does today and the contract suite will compare against.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            <code>new RestBackend(client, { vaultPath, pathFilter?, frontmatterHandler? })</code>.
+            The two optional members exist so phase 3 can inject the same instances the filesystem
+            arm uses, keeping the contract suite honest. Phase 3's wiring snippet needs a one-line
+            edit.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Read the vault path from a module-level global or an env var. Rejected: it hides a real
+            dependency and makes the backend untestable against two vaults in one process, which
+            the fingerprint tests in phase 3 will want.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>Path normalization is duplicated from <code>FileSystemService</code></h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            <code>normalizePath</code> and the traversal check are private to
+            <code>FileSystemService</code>. <code>RestBackend</code> needs both: AGENTS.md's
+            standing rule is that <code>pathFilter.isAllowed</code> plus <code>normalizePath</code>
+            must guard every path input, and a divergence in either would make the two backends
+            disagree about what <code>/note.md</code> or <code>../escape.md</code> means.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Reimplemented inside <code>src/backend/rest/index.ts</code>, marked as a mirror in a
+            comment. This phase's declared Modified Files list is a single entry — AGENTS.md — and
+            reaching into <code>filesystem.ts</code> to export a helper would widen the blast
+            radius of a phase that is supposed to be inert. Phase 3 touches both call sites
+            anyway and is the right place to hoist it.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Export the helper from <code>filesystem.ts</code> now. Better code, wrong phase:
+            it edits a file every existing tool depends on, for a phase whose rollback story is
+            "delete the new directory".
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>Config throws on a malformed protocol or boolean, not only on a malformed port</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec names one strict case: "A malformed <code>OBSIDIAN_PORT</code> throws at
+            startup rather than defaulting. A typo should stop the server, not silently disable
+            REST." It says nothing about <code>OBSIDIAN_PROTOCOL</code> or
+            <code>OBSIDIAN_VERIFY_SSL</code>.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            All three throw. The stated reason for the port rule applies unchanged to the others:
+            <code>OBSIDIAN_PROTOCOL=htp</code> silently falling back to <code>https</code>, or
+            <code>OBSIDIAN_VERIFY_SSL=ture</code> silently reading as <code>false</code>, produce
+            exactly the invisible misconfiguration the rule exists to prevent. Accepted boolean
+            spellings are <code>true/false</code>, <code>1/0</code>, <code>yes/no</code>, case
+            insensitive; empty strings still fall back to the default.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Lenient parsing for everything the spec did not name. Rejected: it makes the strictness
+            of the port check look arbitrary rather than principled.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>The plugin version lives at <code>versions.self</code>, not <code>manifest.version</code></h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec says to check "<code>manifest.version</code> from <code>GET /</code>". The
+            plugin's own OpenAPI document (extracted from the bundled
+            <code>main.js</code> at v4.1.7) defines the root response as
+            <code>{ ok, service, authenticated, versions: { obsidian, self } }</code>. There is no
+            <code>manifest</code> key.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Read <code>versions.self</code>, falling back to <code>manifest.version</code> if a
+            future release renames it. An unparseable or absent version counts as supported —
+            refusing to run because a version string looked odd would be a worse failure than
+            running against a plugin that is almost certainly fine, and the floor is a warning by
+            design.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Trust the spec's field name. It would have read <code>undefined</code> forever and the
+            floor check would have been permanently dead code that always passed.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>The TLS grep criterion is evaluated against non-test sources</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            Success criterion 8 is
+            <code>grep -rn rejectUnauthorized src/backend/rest/</code> expecting "only the Agent
+            constructor". The spec also asks <code>client.test.ts</code> to cover "agent scoping",
+            and any honest test of that names the identifier, which puts a second match in the
+            grep.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            One production match, in <code>RestClient</code>'s constructor, and both greps are
+            run with test files excluded. The agent-scoping test asserts the thing that actually
+            matters — that constructing an HTTPS client leaves the process-wide TLS override
+            environment variable untouched — which is a behavioral check rather than a grep, and
+            it necessarily names the variable. Production sources mention neither identifier
+            outside the agent constructor.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Contort the test to avoid writing the identifier. Rejected: obfuscating a test to
+            satisfy a grep inverts the point of the grep.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>The fixture exposes its file map, and its <code>failWith</code> injector fires once</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec's <code>startFixture</code> signature returns
+            <code>{ port, close, requests }</code>. Phase 3's contract suite has to assert
+            resulting vault state after every write, and there is no way to do that through the
+            HTTP surface without issuing reads that themselves go through the code under test.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Added a <code>files: Map&lt;string, string&gt;</code> live view alongside
+            <code>requests</code>, plus <code>apiKey</code> and <code>pluginVersion</code> options
+            so the 401 translation and the version floor are reachable from tests.
+            <code>failWith</code> is one-shot, matching the spec's wording ("the next request to a
+            matching path"), which also lets a test prove normal service resumes afterwards.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Assert state by reading back through <code>RestBackend</code>. Rejected: a bug that
+            corrupts a write and a matching bug in the read would cancel out and the test would
+            pass.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>Verified live rather than assumed: the note payload carries the whole file</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            <code>readNote</code> has to return a <code>ParsedNote</code> with
+            <code>originalContent</code> and <code>matter</code>, neither of which appears in the
+            plugin's <code>NoteJson</code> schema. If <code>NoteJson.content</code> were the body
+            with the frontmatter block stripped, a second request would have been needed and the
+            spec's "one request rather than three round-trips" claim would have collapsed.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Confirmed against the plugin's bundled source that <code>content</code> is
+            <code>cachedRead(file)</code>, the raw file including its frontmatter block, so a
+            single <code>Accept: application/vnd.olrapi.note+json</code> request feeds
+            <code>FrontmatterHandler.parse</code> and yields the complete
+            <code>ParsedNote</code>. The optional live suite was then run against the real vault
+            (plugin 4.1.7, HTTPS on 27123) and passes, which also confirms the port default, the
+            self-signed-certificate handling, and the <code>{ name, count }</code> tag shape.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Request <code>Accept: text/markdown</code> and parse locally. Equivalent in request
+            count but discards <code>stat</code>, which <code>getNotesInfo</code> would then have
+            to fetch separately.
+          </dd>
+        </dl>
+      </section>
+      <section class="note-entry">
+        <h3>Parity with the filesystem backend was verified now, not deferred to phase 3</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            Phase 3 owns <code>src/backend/contract.test.ts</code>, the suite that runs identical
+            assertions against both backends. Waiting for it would have meant shipping this phase
+            on the assumption that <code>RestBackend</code> already matches
+            <code>FileSystemService</code>, with no evidence.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            A throwaway parity harness was run during the build: 38 operations executed against
+            both backends with deep-equality on results, plus 11 byte-level comparisons of the
+            resulting file after every write. It found two real defects, both now covered by
+            tests in <code>index.test.ts</code>. First, <code>RestBackend</code> resolved its
+            vault path with <code>resolve()</code> while <code>FileSystemService</code> uses
+            <code>realpathSync()</code>, so on macOS every <code>obsidianUri</code> came back as
+            <code>/var/folders/…</code> against the filesystem's
+            <code>/private/var/folders/…</code>. Second, path guards fired in the wrong order in
+            six methods: <code>FileSystemService</code> resolves before its <code>try</code> in
+            some operations and inside it in others, so a traversal attempt is a thrown error in
+            <code>readNote</code> but a <code>{ success: false }</code> message in
+            <code>patchNote</code> and <code>manageTags</code>, and a mismatched
+            <code>confirmPath</code> beats a bad path in <code>deleteNote</code>. The harness was
+            deleted rather than committed — it is phase 3's deliverable, and two copies of the
+            same suite would be worse than one.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Commit the harness as an early contract suite. Rejected: it lands a file this phase's
+            File Changes table does not list, and phase 3 would immediately have to reconcile it
+            with <code>seedBoth</code>. Both defects would otherwise have surfaced in phase 3 as
+            contract failures with no obvious owner.
+          </dd>
+        </dl>
+      </section>
+
+    </main>
+  </body>
+</html>
