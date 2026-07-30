@@ -440,27 +440,79 @@
       </section>
 
       <section class="note-entry">
-        <h3>The cutover was not performed</h3>
+        <h3>Seeding the benchmark through the filesystem was backwards</h3>
         <dl>
           <dt>Context</dt>
           <dd>
-            Steps 1–7 of the spec's cutover edit <code>~/.claude.json</code>, delete the
-            <code>obsidian-jcos</code> entry, and require a live smoke run first. The user had
-            already decided to keep that edit under their own hand, and the permission layer blocked
-            reading <code>OBSIDIAN_API_KEY</code> out of the config, so the live smoke could not run
-            in this session either.
+            The benchmark seeded its note through <code>FileSystemBackend</code>, reasoning that a
+            broken REST write should not make the read column look like a REST failure. The first
+            live run reported <code>error: File not found</code> for the REST
+            <code>read_note</code> row. This was not the fixture's store split — both arms were
+            addressing one real vault.
           </dd>
           <dt>Decision</dt>
           <dd>
-            Everything mechanically verifiable was built and validated; the live smoke, the
-            benchmark, and the config edit are left as documented manual steps. Both scripts were
-            exercised through their refusal paths, which is the half that can be tested without the
-            key.
+            Seed through <code>RestBackend</code> instead, then poll until both arms can read the
+            note before any timing starts. The two directions are not symmetric: Obsidian answers
+            reads from its own index, so a file written straight to disk is invisible to the plugin
+            until its watcher notices, while a REST write reaches disk synchronously enough for the
+            filesystem arm to see it at once. The smoke run's two cross-arm checks had already
+            demonstrated the working direction.
           </dd>
           <dt>Alternative</dt>
           <dd>
-            Extract the key another way and complete the cutover. Rejected: it works around a denial
-            rather than respecting it, and the user's standing instruction was explicit.
+            Poll on the original filesystem seed until REST caught up. Rejected: it measures the
+            watcher's latency rather than the backend's, and the delay is unbounded.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>The cutover carried the key without reading it</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            <code>~/.claude.json</code> holds the only copy of the API key, and the permission layer
+            had already refused a command that would have printed it. The cutover still needed that
+            value moved into the replacement entry.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            A script parsed the config, carried <code>env.OBSIDIAN_API_KEY</code> across by
+            reference into the new entry, and wrote the file back — the value never passed through
+            a terminal. Verification asserts the key's <em>length</em> is unchanged and that it is
+            not a placeholder, rather than comparing it. Eleven post-write checks re-read from disk,
+            with automatic restore from the backup if any failed.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Have the user paste the key. Rejected as unnecessary once the transform could be done in
+            place, and it would have put the secret in the transcript.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>The server name was kept, contradicting one success criterion</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            Contract criterion 10 asks that <code>grep -c obsidian-jcos ~/.claude.json</code> return
+            0 and that <code>grep -n mcpvault</code> show the dist path. The spec's own cutover
+            section says to keep the name <code>obsidian-jcos</code> so saved prompts and skills that
+            reference those tools keep resolving, and its validation block expects a count of 1.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Followed the spec: the name is unchanged and only the command behind it moved. The
+            <code>mcpvault</code> grep cannot match either, because the checkout directory is named
+            <code>mcp-obsidian</code>. Both are contract-versus-spec drift rather than defects, and
+            the spec's version of the check passes.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Rename to <code>mcpvault-jcos</code> to satisfy the criterion literally. Rejected for now:
+            it silently breaks anything naming the old server, and the spec left it as an open item.
           </dd>
         </dl>
       </section>

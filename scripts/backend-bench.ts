@@ -87,6 +87,27 @@ async function measure(
   }
 }
 
+/**
+ * Blocks until `backend` can read the seed note, or gives up.
+ *
+ * Both arms must see the seed before any timing starts, or a row reports the
+ * latency of an error path as though it were a read.
+ */
+async function waitUntilReadable(backend: VaultBackend, label: string): Promise<void> {
+  const deadline = Date.now() + 3000;
+  let lastError = "never attempted";
+  while (Date.now() < deadline) {
+    try {
+      await backend.readNote(SCRATCH_NOTE);
+      return;
+    } catch (err) {
+      lastError = describeError(err);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  throw new Error(`${label} could not read the seed note after 3s: ${lastError}`);
+}
+
 const COLUMN = 22;
 
 function format(ms: number | null, error?: string): string {
@@ -129,13 +150,24 @@ async function main(): Promise<void> {
   const rows: Row[] = [];
 
   try {
-    // Seed the note both arms read, through the filesystem so a broken REST
-    // write does not make the read column look like a REST failure.
-    await fsBackend.writeNote({
+    // Seed through REST, not the filesystem.
+    //
+    // The two directions are not symmetric. Obsidian answers reads from its own
+    // index, and a file written straight to disk is invisible to the plugin
+    // until its watcher notices — so a filesystem seed followed immediately by
+    // a REST read reports "File not found" and the REST column shows an error
+    // instead of a timing. A REST write goes through Obsidian, which writes to
+    // disk synchronously enough that the filesystem arm sees it at once.
+    await restBackend.writeNote({
       path: SCRATCH_NOTE,
       content: "# bench\n\nbody\n",
       mode: "overwrite",
     });
+
+    // Confirm both arms can actually read the seed before timing anything.
+    // Without this the read row silently measures an error path.
+    await waitUntilReadable(restBackend, "REST");
+    await waitUntilReadable(fsBackend, "filesystem");
 
     for (const operation of ["read_note", "write_note", "list_directory"] as const) {
       const rest = await measure(restBackend, operation);
