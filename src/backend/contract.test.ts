@@ -1,9 +1,12 @@
 import { test, expect, beforeEach, afterEach, describe } from "vitest";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { FileSystemBackend } from "./filesystem/index.js";
 import { RestBackend } from "./rest/index.js";
 import { seedBoth } from "./testing/seed.js";
 import type { SeededVault, VaultState } from "./testing/seed.js";
 import type { VaultBackend } from "./types.js";
+import { PeriodicNotesUnconfiguredError, UnsupportedPeriodError } from "./periodic/resolve.js";
 import { generateObsidianUri } from "../uri.js";
 
 /**
@@ -506,6 +509,148 @@ for (const arm of BACKENDS) {
 
       expect(result.success).toBe(false);
       expect(result.message).toMatch(/^Access denied/);
+    });
+  });
+}
+
+// ============================================================================
+// getPeriodicNote / getDocumentMap
+//
+// A second seed rather than more entries in SEED: a `Daily_Notes/` tree would
+// change the root listing every arm above asserts, and the daily-notes settings
+// file has to exist on disk (never in the REST fixture) because the resolver
+// reads it directly, bypassing PathFilter, on both arms.
+// ============================================================================
+
+const JULY_30_2026 = new Date(2026, 6, 30);
+
+const STRUCTURED = [
+  "---",
+  "title: Structured",
+  "tags:",
+  "  - one",
+  "---",
+  "",
+  "# Top",
+  "",
+  "## Middle",
+  "",
+  "```bash",
+  "# not a heading",
+  "```",
+  "",
+  "### Deep",
+  "",
+  "a claim ^abc123",
+  "",
+].join("\n");
+
+const PERIODIC_SEED: Record<string, string> = {
+  "Daily_Notes/2026/07/2026-07-30.md": "---\nmood: fine\n---\n\n# Thursday\n",
+  "structured.md": STRUCTURED,
+  "plain.md": "no structure here\n",
+};
+
+for (const arm of BACKENDS) {
+  describe(`backend contract, periodic and document map: ${arm.name}`, () => {
+    let env: SeededVault;
+    let backend: VaultBackend;
+
+    async function writeDailyNotesConfig(config: unknown): Promise<void> {
+      await mkdir(join(env.vaultPath, ".obsidian"), { recursive: true });
+      await writeFile(
+        join(env.vaultPath, ".obsidian", "daily-notes.json"),
+        JSON.stringify(config),
+        "utf-8",
+      );
+    }
+
+    beforeEach(async () => {
+      env = await seedBoth(PERIODIC_SEED);
+      backend = arm.make(env);
+    });
+
+    afterEach(async () => {
+      await env.cleanup();
+    });
+
+    test("getPeriodicNote resolves the nested layout and reads the note", async () => {
+      await writeDailyNotesConfig({ folder: "Daily_Notes", format: "YYYY/MM/YYYY-MM-DD" });
+
+      expect(await backend.getPeriodicNote({ period: "daily", date: JULY_30_2026 })).toEqual({
+        period: "daily",
+        path: "Daily_Notes/2026/07/2026-07-30.md",
+        exists: true,
+        frontmatter: { mood: "fine" },
+        content: "\n# Thursday\n",
+      });
+    });
+
+    test("getPeriodicNote returns the path with exists false when the note is absent", async () => {
+      await writeDailyNotesConfig({ folder: "Daily_Notes", format: "YYYY/MM/YYYY-MM-DD" });
+
+      expect(
+        await backend.getPeriodicNote({ period: "daily", date: new Date(2026, 6, 29) }),
+      ).toEqual({
+        period: "daily",
+        path: "Daily_Notes/2026/07/2026-07-29.md",
+        exists: false,
+      });
+    });
+
+    test("getPeriodicNote follows a changed config rather than a duplicated setting", async () => {
+      await writeDailyNotesConfig({ folder: "Journal", format: "YYYY-MM-DD" });
+
+      const result = await backend.getPeriodicNote({ period: "daily", date: JULY_30_2026 });
+
+      expect(result.path).toBe("Journal/2026-07-30.md");
+      expect(result.exists).toBe(false);
+    });
+
+    test("getPeriodicNote reports unconfigured daily notes instead of guessing", async () => {
+      await expect(
+        backend.getPeriodicNote({ period: "daily", date: JULY_30_2026 }),
+      ).rejects.toThrow(PeriodicNotesUnconfiguredError);
+    });
+
+    test("getPeriodicNote names the missing periodic-notes plugin for weekly", async () => {
+      await writeDailyNotesConfig({ folder: "Daily_Notes", format: "YYYY-MM-DD" });
+
+      await expect(
+        backend.getPeriodicNote({ period: "weekly", date: JULY_30_2026 }),
+      ).rejects.toThrow(UnsupportedPeriodError);
+    });
+
+    test("getDocumentMap reports headings, block refs, and frontmatter keys", async () => {
+      expect(await backend.getDocumentMap("structured.md")).toEqual({
+        headings: [
+          { path: "Top", level: 1, line: 2 },
+          { path: "Top::Middle", level: 2, line: 4 },
+          { path: "Top::Middle::Deep", level: 3, line: 10 },
+        ],
+        blockRefs: ["abc123"],
+        frontmatterKeys: ["title", "tags"],
+      });
+    });
+
+    test("getDocumentMap returns empty collections for an unstructured note", async () => {
+      expect(await backend.getDocumentMap("plain.md")).toEqual({
+        headings: [],
+        blockRefs: [],
+        frontmatterKeys: [],
+      });
+    });
+
+    test("getDocumentMap rejects a missing note", async () => {
+      await expect(backend.getDocumentMap("missing.md")).rejects.toThrow(
+        "File not found: missing.md. Use list_directory to see available files, or check the path spelling.",
+      );
+    });
+
+    test("getDocumentMap rejects a restricted path", async () => {
+      await expect(backend.getDocumentMap(".obsidian/workspace.md")).rejects.toThrow(
+        /^Access denied/,
+      );
     });
   });
 }

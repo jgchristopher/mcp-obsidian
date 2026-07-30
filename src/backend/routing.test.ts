@@ -72,6 +72,20 @@ class StubBackend implements VaultBackend {
   manageTags(): any {
     return this.run("manageTags", { path: "x", operation: "list", tags: [], success: true });
   }
+  getPeriodicNote(): any {
+    return this.run("getPeriodicNote", {
+      period: "daily",
+      path: `${this.name}.md`,
+      exists: true,
+    });
+  }
+  getDocumentMap(): any {
+    return this.run("getDocumentMap", {
+      headings: [{ path: this.name, level: 1, line: 1 }],
+      blockRefs: [],
+      frontmatterKeys: [],
+    });
+  }
 }
 
 class StubHealth implements HealthGate {
@@ -233,6 +247,8 @@ describe("unknown-state", () => {
     await routing.listDirectory("");
     await routing.getFrontmatter("note.md");
     await routing.listAllTags();
+    await routing.getPeriodicNote({ period: "daily", date: new Date(2026, 6, 30) });
+    await routing.getDocumentMap("note.md");
 
     expect(filesystem.calls).toEqual([
       "readNote",
@@ -241,6 +257,8 @@ describe("unknown-state", () => {
       "listDirectory",
       "getFrontmatter",
       "listAllTags",
+      "getPeriodicNote",
+      "getDocumentMap",
     ]);
   });
 });
@@ -316,6 +334,8 @@ test("every VaultBackend member is classified, and writes are the default", () =
     "updateFrontmatter",
     "manageTags",
     "listAllTags",
+    "getPeriodicNote",
+    "getDocumentMap",
   ];
 
   // Guards against a member being added to the interface and silently skipped

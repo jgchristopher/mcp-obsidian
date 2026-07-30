@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Implementation Notes — Phase 4</title>
+    <style>
+      :root {
+        --color-bg: #ffffff;
+        --color-surface: #f8f9fa;
+        --color-border: #dee2e6;
+        --color-text: #212529;
+        --color-text-muted: #6c757d;
+
+        --color-accent: #4361ee;
+        --color-accent-bg: #eef0ff;
+
+        --color-success: #2d6a4f;
+        --color-success-bg: #d8f3dc;
+
+        --color-danger: #9b2226;
+        --color-danger-bg: #fde8e8;
+
+        --color-warning: #b45309;
+        --color-warning-bg: #fef3c7;
+
+        --font-sans:
+          system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+          sans-serif;
+        --font-mono:
+          'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', Menlo, Consolas,
+          monospace;
+
+        --space-1: 4px;
+        --space-2: 8px;
+        --space-3: 16px;
+        --space-4: 24px;
+        --space-5: 32px;
+        --space-6: 48px;
+
+        --radius-sm: 4px;
+        --radius-md: 8px;
+        --radius-lg: 12px;
+
+        --max-width: 900px;
+        --sidebar-width: 220px;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        [data-theme='auto'] {
+          --color-bg: #1a1a2e;
+          --color-surface: #16213e;
+          --color-border: #2a2a4a;
+          --color-text: #e0e0e0;
+          --color-text-muted: #a0a0b0;
+
+          --color-accent: #6c83f7;
+          --color-accent-bg: #1e2a4a;
+
+          --color-success: #4ade80;
+          --color-success-bg: #14352a;
+
+          --color-danger: #f87171;
+          --color-danger-bg: #3a1818;
+
+          --color-warning: #fbbf24;
+          --color-warning-bg: #3a2a08;
+        }
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: var(--font-sans);
+        font-size: 16px;
+        line-height: 1.6;
+        color: var(--color-text);
+        background: var(--color-bg);
+        max-width: var(--max-width);
+        margin: 0 auto;
+        padding: var(--space-5) var(--space-4);
+      }
+
+      .doc-header {
+        border-bottom: 1px solid var(--color-border);
+        padding-bottom: var(--space-3);
+        margin-bottom: var(--space-5);
+      }
+
+      .doc-header h1 {
+        margin: 0 0 var(--space-1) 0;
+        font-size: 28px;
+        line-height: 1.25;
+      }
+
+      .doc-meta {
+        color: var(--color-text-muted);
+        font-size: 14px;
+        margin: 0;
+      }
+
+      .doc-content h2 {
+        margin-top: var(--space-6);
+        padding-bottom: var(--space-2);
+        border-bottom: 1px solid var(--color-border);
+        font-size: 22px;
+      }
+
+      .doc-content h3 {
+        margin-top: var(--space-5);
+        font-size: 18px;
+      }
+
+      .doc-content p,
+      .doc-content li,
+      .doc-content dd {
+        font-size: 15px;
+      }
+
+      code {
+        font-family: var(--font-mono);
+        font-size: 0.9em;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        padding: 1px 4px;
+      }
+
+      .note-entry {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-left: 3px solid var(--color-accent);
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-4);
+        margin-bottom: var(--space-4);
+      }
+
+      .note-entry h3 {
+        margin-top: 0;
+      }
+
+      .note-entry dt {
+        font-weight: 600;
+        color: var(--color-text-muted);
+        font-size: 13px;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        margin-top: var(--space-3);
+      }
+
+      .note-entry dd {
+        margin: var(--space-1) 0 0 0;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="doc-header">
+      <h1>Implementation Notes — Phase 4</h1>
+      <p class="doc-meta">MCPVault REST Backend · 2026-07-30 · New tools</p>
+    </header>
+    <main class="doc-content">
+      <section class="note-entry">
+        <h3>Date resolver — local time, and tests that build dates locally</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec's smoke case is
+            <code>formatDate("YYYY-MM-DD", new Date("2026-07-30"))</code> yielding
+            <code>2026-07-30</code>. An ISO date string parses as <em>UTC</em>
+            midnight, so <code>getDate()</code> returns 29 anywhere west of
+            Greenwich. Written literally, that assertion is a timezone-bound test —
+            the same class of bug as the clock-bound test the spec's own Failure
+            Modes table warns about.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            <code>formatDate</code> reads local components
+            (<code>getFullYear</code>, <code>getMonth</code>, <code>getDate</code>),
+            because a daily note belongs to the user's day, not to UTC's. Every test
+            builds its date with <code>new Date(2026, 6, 30)</code>, and
+            <code>createServer</code>'s <code>date</code> argument parses
+            <code>YYYY-MM-DD</code> into the same local constructor. The assertion
+            the spec asked for still holds, in every timezone.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            UTC getters, which would make the spec's literal snippet pass. Rejected:
+            at 8pm in Chicago that resolves tomorrow's note, which is wrong for the
+            one user this feature exists for.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>Tool count — createServer.test.ts had to be edited</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            Contract success criterion 6 asks for no changes to the nine pre-existing
+            test files. <code>src/createServer.test.ts</code> is one of them, and it
+            asserts <code>toHaveLength(16)</code> plus the sorted tool-name list. The
+            phase's whole job is registering nine more tools, so that assertion
+            cannot survive.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Edited that one test to 25 and added the nine names, which is what the
+            spec's own Testing Requirements table asks for
+            (<em>"ListTools returns 25"</em>). No other pre-existing test file was
+            touched; the criterion's real intent — behavior unchanged with REST off —
+            still holds, verified by
+            <code>env -u OBSIDIAN_API_KEY npm test</code>.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Leave it and add a second file asserting 25. Rejected: the old assertion
+            would simply fail, so this would be two contradictory tests rather than
+            zero edits.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>Fixture server — four endpoints the spec's file table omitted</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec's feedback loop for <code>ObsidianLiveService</code> calls for
+            the phase 2 fixture "with <code>/commands/</code>, <code>/active/</code>,
+            <code>/open/</code>, and <code>/search/</code> stubbed", but
+            <code>src/backend/testing/fixture-server.ts</code> is not in the Modified
+            Files table.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Extended the fixture with those four routes plus
+            <code>executedCommands</code> and <code>openedFiles</code> so tests can
+            assert effects rather than only responses. <code>POST /search/</code>
+            answers <code>400 errorCode 40012</code> for any content type other than
+            JsonLogic, mirroring what the live plugin does with Dataview absent — so
+            a future change that sent the DQL type would fail here.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            A second, live-only fixture. Rejected: two doubles of the same plugin
+            drift, and CI has no Obsidian to fall back on.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>Periodic resolution reads local disk on the REST arm too</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The plugin exposes <code>/periodic/{period}/</code> endpoints, so the REST
+            arm could have resolved the daily note through Obsidian instead of
+            reading <code>.obsidian/daily-notes.json</code>.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Both arms call the same <code>loadPeriodicNote</code>, which resolves the
+            path from the local settings file and then reads through
+            <em>that arm's</em> <code>readNote</code>. The read still routes; the
+            resolution does not. A second source of truth for folder and format is
+            exactly the drift goal 3 exists to prevent, and the plugin's periodic
+            endpoints only answer for the periods the absent
+            <code>periodic-notes</code> plugin would provide.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            <code>GET /periodic/daily/</code> on the REST arm. Rejected: the contract
+            suite would then be comparing two different resolvers, and the one that
+            works headless is the one that must be authoritative.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>open_file carries the same path guard as every other path tool</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            <code>ObsidianLiveService</code> sits outside <code>VaultBackend</code>,
+            so it inherits none of <code>RestBackend</code>'s guards, and the spec
+            does not mention filtering <code>open_file</code>'s path. The repo's
+            standing rule (AGENTS.md) is that <code>pathFilter.isAllowed</code> plus
+            normalization must guard every new tool's path input — the exact blocker
+            that stopped PR #146.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            <code>open_file</code> normalizes, rejects traversal, and runs
+            <code>PathFilter</code> before any request leaves the process. This is the
+            third copy of that guard (<code>FileSystemService</code>,
+            <code>RestBackend</code>, here); it is deliberately the smallest of the
+            three, and extracting all three is left for whoever next has a reason to
+            touch <code>filesystem.ts</code>'s copy.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Rely on the plugin to refuse. Rejected: a tool that can surface
+            <code>.obsidian/*</code> in the UI is a hole in a boundary this project
+            keeps closed everywhere else, and the plugin's behavior is not ours to
+            depend on.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>The five REST-only tools are not gated by the vault fingerprint</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            <code>Health</code> refuses REST when Obsidian holds a different vault
+            than <code>vaultPath</code>. <code>ObsidianLiveService</code> sits outside
+            the seam, so no such gate applies to it.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Left ungated, as the spec specifies. <code>list_commands</code>,
+            <code>execute_command</code>, and <code>get_active_file</code> are
+            app-global rather than vault-relative, so gating them on vault identity
+            would refuse correct calls. The one vault-relative member,
+            <code>open_file</code>, performs a UI navigation with no write.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Inject <code>HealthGate</code> and gate <code>open_file</code>. Not
+            rejected on merit — deferred, because it needs the live parity pass in
+            phase 5 to say whether a mismatched-vault <code>open_file</code> is
+            confusing enough to be worth the coupling.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>A malformed daily-notes.json throws instead of reading as "unconfigured"</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The spec covers exactly two cases for the config reader: present, and
+            missing (<code>null</code>). It says nothing about a file that exists but
+            is unparseable.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Missing returns <code>null</code> as specified. Unreadable or malformed
+            throws, naming the path. Reporting a broken settings file as "daily notes
+            are not configured" would send the user to enable a plugin that is
+            already enabled.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Return <code>null</code> for anything that fails to parse. Rejected: it
+            collapses two very different faults into one misleading message.
+          </dd>
+        </dl>
+      </section>
+
+      <section class="note-entry">
+        <h3>Module path — src/backend/periodic, not src/backend/filesystem/periodic</h3>
+        <dl>
+          <dt>Context</dt>
+          <dd>
+            The contract's success criterion 3 checks
+            <code>npm test -- src/backend/filesystem/periodic</code>, while the phase
+            spec's File Changes table puts every periodic file under
+            <code>src/backend/periodic/</code>.
+          </dd>
+          <dt>Decision</dt>
+          <dd>
+            Followed the spec. The resolver is shared by both arms — the REST backend
+            imports it too — so filing it under <code>filesystem/</code> would say the
+            wrong thing about ownership. Phase 5's verification should run
+            <code>npm test -- src/backend/periodic</code>.
+          </dd>
+          <dt>Alternative</dt>
+          <dd>
+            Match the contract's path so the check command runs verbatim. Rejected:
+            the directory name would be actively misleading, and the criterion's
+            substance (config-derived resolution, proven by changing the fixture
+            config) is asserted either way.
+          </dd>
+        </dl>
+      </section>
+    </main>
+  </body>
+</html>

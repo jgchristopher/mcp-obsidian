@@ -1,6 +1,8 @@
 import { FrontmatterHandler } from "../../frontmatter.js";
 import { PathFilter } from "../../pathfilter.js";
 import type { VaultBackend } from "../types.js";
+import type { DocumentMap } from "../documentMap.js";
+import type { PeriodicNoteParams, PeriodicNoteResult } from "../periodic/resolve.js";
 import { RestClient } from "./client.js";
 import type { BatchReadParams, BatchReadResult, DeleteNoteParams, DeleteResult, DirectoryListing, MoveFileParams, MoveNoteParams, MoveResult, NoteInfo, NoteWriteParams, ParsedNote, PatchNoteParams, PatchNoteResult, TagManagementParams, TagManagementResult, UpdateFrontmatterParams } from "../../types.js";
 /**
@@ -89,6 +91,19 @@ export declare class RestBackend implements VaultBackend {
     }>;
     readNote(inputPath: string): Promise<ParsedNote>;
     getFrontmatter(inputPath: string): Promise<Record<string, any>>;
+    /**
+     * Resolution reads `.obsidian/daily-notes.json` off the local disk even on
+     * this arm. The plugin's `/periodic/` endpoints only answer for periods the
+     * absent `periodic-notes` plugin would provide, and taking the setting from a
+     * second source would be exactly the drift `get_periodic_note` exists to
+     * avoid. The *read* still routes: it goes through this backend's `readNote`.
+     */
+    getPeriodicNote(params: PeriodicNoteParams): Promise<PeriodicNoteResult>;
+    /**
+     * Built from the note payload this backend already fetches, so routing the
+     * map costs one mapping rather than a second request.
+     */
+    getDocumentMap(inputPath: string): Promise<DocumentMap>;
     readMultipleNotes(params: BatchReadParams): Promise<BatchReadResult>;
     getNotesInfo(paths: string[]): Promise<NoteInfo[]>;
     listDirectory(inputPath?: string): Promise<DirectoryListing>;

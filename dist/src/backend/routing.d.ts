@@ -1,4 +1,6 @@
 import type { VaultBackend } from "./types.js";
+import type { DocumentMap } from "./documentMap.js";
+import type { PeriodicNoteParams, PeriodicNoteResult } from "./periodic/resolve.js";
 import type { HealthGate } from "./health.js";
 import type { BatchReadParams, BatchReadResult, DeleteNoteParams, DeleteResult, DirectoryListing, MoveFileParams, MoveNoteParams, MoveResult, NoteInfo, NoteWriteParams, ParsedNote, PatchNoteParams, PatchNoteResult, TagManagementParams, TagManagementResult, UpdateFrontmatterParams } from "../types.js";
 /**
@@ -42,6 +44,8 @@ export declare class RoutingBackend implements VaultBackend {
         tag: string;
         count: number;
     }>>;
+    getPeriodicNote(params: PeriodicNoteParams): Promise<PeriodicNoteResult>;
+    getDocumentMap(path: string): Promise<DocumentMap>;
     writeNote(params: NoteWriteParams): Promise<void>;
     patchNote(params: PatchNoteParams): Promise<PatchNoteResult>;
     deleteNote(params: DeleteNoteParams): Promise<DeleteResult>;

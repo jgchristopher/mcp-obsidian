@@ -12,7 +12,7 @@ import { test, expect, beforeEach, afterEach, describe } from "vitest";
 import { createServer } from "./createServer.js";
 import { FileSystemBackend } from "./backend/filesystem/index.js";
 import { FileSystemService } from "./filesystem.js";
-import type { VaultBackend } from "./backend/types.js";
+import type { PeriodicNoteParams, VaultBackend } from "./backend/types.js";
 import type {
   BatchReadParams,
   DeleteNoteParams,
@@ -23,7 +23,7 @@ import type {
   TagManagementParams,
   UpdateFrontmatterParams,
 } from "./types.js";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "fs/promises";
+import { mkdtemp, mkdir, readFile, rm, utimes, writeFile } from "fs/promises";
 import { startFixture } from "./backend/testing/fixture-server.js";
 import type { Fixture } from "./backend/testing/fixture-server.js";
 import { dirname, join } from "path";
@@ -82,6 +82,12 @@ class RecordingBackend implements VaultBackend {
   listAllTags() {
     return this.record("listAllTags", () => this.inner.listAllTags());
   }
+  getPeriodicNote(params: PeriodicNoteParams) {
+    return this.record("getPeriodicNote", () => this.inner.getPeriodicNote(params));
+  }
+  getDocumentMap(path: string) {
+    return this.record("getDocumentMap", () => this.inner.getDocumentMap(path));
+  }
 }
 
 let testVaultPath: string;
@@ -93,7 +99,10 @@ beforeEach(async () => {
   testVaultPath = await mkdtemp(join(tmpdir(), "mcpvault-routing-"));
   recorder = new RecordingBackend(new FileSystemBackend(new FileSystemService(testVaultPath)));
 
-  const server = createServer(testVaultPath, { version: "1.0.0", backend: recorder });
+  // `env: {}` keeps these hermetic: without it, a developer with
+  // OBSIDIAN_API_KEY exported would get a real REST client behind the
+  // REST-only tools and the "no Obsidian" expectations below would not hold.
+  const server = createServer(testVaultPath, { version: "1.0.0", backend: recorder, env: {} });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   client = new Client({ name: "routing-test-client", version: "1.0.0" });
   await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
@@ -281,10 +290,67 @@ describe("routed tools go through the backend", () => {
     expect(result.isError).toBeFalsy();
     expect(JSON.parse(text(result))).toEqual([{ tag: "alpha", count: 1 }]);
   });
+
+  test("get_periodic_note", async () => {
+    await seed(".obsidian/daily-notes.json", JSON.stringify({ folder: "D", format: "YYYY-MM-DD" }));
+    await seed("D/2026-07-30.md", "# Thursday");
+    const result = await client.callTool({
+      name: "get_periodic_note",
+      arguments: { period: "daily", date: "2026-07-30" },
+    });
+
+    expect(recorder.calls).toEqual(["getPeriodicNote"]);
+    expect(result.isError).toBeFalsy();
+    expect(JSON.parse(text(result))).toMatchObject({
+      period: "daily",
+      path: "D/2026-07-30.md",
+      exists: true,
+    });
+  });
+
+  test("get_periodic_note defaults to today without a date argument", async () => {
+    await seed(".obsidian/daily-notes.json", JSON.stringify({ folder: "D", format: "YYYY-MM-DD" }));
+    const result = await client.callTool({ name: "get_periodic_note", arguments: {} });
+
+    expect(recorder.calls).toEqual(["getPeriodicNote"]);
+    const now = new Date();
+    const expected = `D/${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}.md`;
+    expect(JSON.parse(text(result)).path).toBe(expected);
+  });
+
+  test("get_periodic_note rejects a malformed date before touching the backend", async () => {
+    const result = await client.callTool({
+      name: "get_periodic_note",
+      arguments: { date: "30/07/2026" },
+    });
+
+    expect(recorder.calls).toEqual([]);
+    expect(result.isError).toBe(true);
+    expect(text(result)).toContain("Use YYYY-MM-DD");
+  });
+
+  test("get_document_map", async () => {
+    await seed("map.md", "---\nk: v\n---\n\n# Top\n\n## Under\n\nline ^ref1\n");
+    const result = await client.callTool({
+      name: "get_document_map",
+      arguments: { path: "map.md" },
+    });
+
+    expect(recorder.calls).toEqual(["getDocumentMap"]);
+    expect(result.isError).toBeFalsy();
+    expect(JSON.parse(text(result))).toEqual({
+      headings: [
+        { path: "Top", level: 1, line: 2 },
+        { path: "Top::Under", level: 2, line: 4 },
+      ],
+      blockRefs: ["ref1"],
+      frontmatterKeys: ["k"],
+    });
+  });
 });
 
 // ============================================================================
-// The three unrouted tools must never consult the backend
+// The unrouted tools must never consult the backend
 // ============================================================================
 
 describe("unrouted tools never consult the backend", () => {
@@ -316,6 +382,118 @@ describe("unrouted tools never consult the backend", () => {
     expect(recorder.calls).toEqual([]);
     expect(result.isError).toBeFalsy();
     expect((result.structuredContent as any).path).toBe("Note.md");
+  });
+
+  test("get_recent_changes stays filesystem-native and honors limit and days", async () => {
+    await seed("recent.md", "fresh");
+    await seed("stale.md", "old");
+    const staleTime = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000);
+    await utimes(join(testVaultPath, "stale.md"), staleTime, staleTime);
+
+    const windowed = await client.callTool({ name: "get_recent_changes", arguments: {} });
+    expect(recorder.calls).toEqual([]);
+    expect(JSON.parse(text(windowed)).map((entry: any) => entry.path)).toEqual(["recent.md"]);
+
+    const widened = await client.callTool({
+      name: "get_recent_changes",
+      arguments: { days: 365 },
+    });
+    expect(JSON.parse(text(widened)).map((entry: any) => entry.path).sort()).toEqual([
+      "recent.md",
+      "stale.md",
+    ]);
+
+    const capped = await client.callTool({
+      name: "get_recent_changes",
+      arguments: { days: 365, limit: 1 },
+    });
+    expect(JSON.parse(text(capped))).toHaveLength(1);
+  });
+
+  test("get_recent_changes falls back to its defaults for unusable numbers", async () => {
+    await seed("recent.md", "fresh");
+
+    // NaN survives Math.min/Math.max, and a NaN bound silently returns nothing.
+    const garbage = await client.callTool({
+      name: "get_recent_changes",
+      arguments: { limit: "lots", days: "forever" },
+    });
+
+    expect(garbage.isError).toBeFalsy();
+    expect(JSON.parse(text(garbage)).map((entry: any) => entry.path)).toEqual(["recent.md"]);
+  });
+
+  test("get_recent_changes caps limit at 100", async () => {
+    await seed("only.md", "one");
+
+    const result = await client.callTool({
+      name: "get_recent_changes",
+      arguments: { limit: 100_000 },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(JSON.parse(text(result))).toHaveLength(1);
+  });
+
+  test("get_recent_periodic_notes stays filesystem-native and skips missing dates", async () => {
+    await seed(".obsidian/daily-notes.json", JSON.stringify({ folder: "D", format: "YYYY-MM-DD" }));
+    const today = new Date();
+    const stamp = (back: number): string => {
+      const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() - back);
+      return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+    };
+    await seed(`D/${stamp(0)}.md`, "# Today");
+    await seed(`D/${stamp(2)}.md`, "# Two days ago");
+
+    const result = await client.callTool({
+      name: "get_recent_periodic_notes",
+      arguments: { limit: 5 },
+    });
+
+    expect(recorder.calls).toEqual([]);
+    expect(result.isError).toBeFalsy();
+    expect(JSON.parse(text(result)).map((entry: any) => entry.path)).toEqual([
+      `D/${stamp(0)}.md`,
+      `D/${stamp(2)}.md`,
+    ]);
+  });
+
+  test("get_recent_periodic_notes can drop content", async () => {
+    await seed(".obsidian/daily-notes.json", JSON.stringify({ folder: "D", format: "YYYY-MM-DD" }));
+    const today = new Date();
+    const stamp = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    await seed(`D/${stamp}.md`, "# Today");
+
+    const result = await client.callTool({
+      name: "get_recent_periodic_notes",
+      arguments: { includeContent: false },
+    });
+
+    const [first] = JSON.parse(text(result));
+    expect(first).toEqual({ period: "daily", path: `D/${stamp}.md`, exists: true, frontmatter: {} });
+  });
+});
+
+// ============================================================================
+// The five REST-only tools fail closed rather than degrading to the filesystem
+// ============================================================================
+
+describe("REST-only tools with no Obsidian", () => {
+  const calls: Array<[string, Record<string, unknown>]> = [
+    ["list_commands", {}],
+    ["execute_command", { commandId: "app:open-vault" }],
+    ["get_active_file", {}],
+    ["open_file", { path: "any.md" }],
+    ["search_vault_advanced", { query: { var: "path" } }],
+  ];
+
+  test.each(calls)("%s reports that Obsidian is not reachable", async (name, args) => {
+    const result = await client.callTool({ name, arguments: args });
+
+    expect(result.isError).toBe(true);
+    expect(text(result)).toContain(`'${name}' requires a running Obsidian`);
+    // Nothing quietly fell back to the filesystem behind the error.
+    expect(recorder.calls).toEqual([]);
   });
 });
 
@@ -576,5 +754,69 @@ describe("REST wiring", () => {
 
     expect(result.isError).toBeFalsy();
     expect(JSON.parse(text(result)).content).toContain("# Root");
+  });
+
+  // The five REST-only tools share the client the backend uses, but not the
+  // seam. These prove the env-to-handler wiring, not the service itself —
+  // src/backend/live.test.ts covers the behavior.
+
+  test("list_commands reaches the Local REST API", async () => {
+    fixture = await startFixture({ files: { "root.md": "# Root" } });
+    await boot({ "root.md": "# Root" }, envFor());
+
+    const result = await restClient.callTool({ name: "list_commands", arguments: {} });
+
+    expect(result.isError).toBeFalsy();
+    expect(JSON.parse(text(result))[0].id).toBe("app:open-vault");
+  });
+
+  test("execute_command reaches the Local REST API", async () => {
+    fixture = await startFixture({ files: { "root.md": "# Root" } });
+    await boot({ "root.md": "# Root" }, envFor());
+
+    const result = await restClient.callTool({
+      name: "execute_command",
+      arguments: { commandId: "app:open-vault" },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(fixture.executedCommands).toEqual(["app:open-vault"]);
+  });
+
+  test("get_active_file reaches the Local REST API", async () => {
+    fixture = await startFixture({ files: { "root.md": "# Root" }, activeFile: "root.md" });
+    await boot({ "root.md": "# Root" }, envFor());
+
+    const result = await restClient.callTool({ name: "get_active_file", arguments: {} });
+
+    expect(result.isError).toBeFalsy();
+    expect(JSON.parse(text(result))).toEqual({ path: "root.md" });
+  });
+
+  test("open_file reaches the Local REST API", async () => {
+    fixture = await startFixture({ files: { "root.md": "# Root" } });
+    await boot({ "root.md": "# Root" }, envFor());
+
+    const result = await restClient.callTool({
+      name: "open_file",
+      arguments: { path: "root.md" },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(fixture.openedFiles).toEqual(["root.md"]);
+  });
+
+  test("search_vault_advanced reaches the Local REST API as JsonLogic", async () => {
+    fixture = await startFixture({ files: { "root.md": "# Root" } });
+    await boot({ "root.md": "# Root" }, envFor());
+
+    const result = await restClient.callTool({
+      name: "search_vault_advanced",
+      arguments: { query: { var: "path" } },
+    });
+
+    expect(result.isError).toBeFalsy();
+    const search = fixture.requests.find((entry) => entry.path === "/search/");
+    expect(search?.headers["content-type"]).toBe("application/vnd.olrapi.jsonlogic+json");
   });
 });

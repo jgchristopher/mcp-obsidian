@@ -1,4 +1,7 @@
 import type { ParsedNote, NoteWriteParams, PatchNoteParams, PatchNoteResult, DeleteNoteParams, DeleteResult, DirectoryListing, MoveNoteParams, MoveFileParams, MoveResult, BatchReadParams, BatchReadResult, UpdateFrontmatterParams, NoteInfo, TagManagementParams, TagManagementResult } from "../types.js";
+import type { DocumentMap } from "./documentMap.js";
+import type { PeriodicNoteParams, PeriodicNoteResult } from "./periodic/resolve.js";
+export type { PeriodicNoteParams, PeriodicNoteResult, PeriodicPeriod } from "./periodic/resolve.js";
 /**
  * How a backend failed, classified by what the routing policy needs to decide:
  * whether falling back to another backend is safe for the operation at hand.
@@ -53,5 +56,17 @@ export interface VaultBackend {
         tag: string;
         count: number;
     }>>;
+    /**
+     * Resolve a period to a vault-relative path and read it.
+     *
+     * Routed because the read is a read: whichever backend is serving `readNote`
+     * should serve this too. The path itself is always derived from Obsidian's own
+     * `.obsidian/daily-notes.json` on local disk, on both arms — the plugin's
+     * `/periodic/` endpoints cover only what the absent `periodic-notes` plugin
+     * would provide, and a second source of truth is how the two drift apart.
+     */
+    getPeriodicNote(params: PeriodicNoteParams): Promise<PeriodicNoteResult>;
+    /** Headings, block references, and frontmatter keys for one note. */
+    getDocumentMap(path: string): Promise<DocumentMap>;
 }
 //# sourceMappingURL=types.d.ts.map

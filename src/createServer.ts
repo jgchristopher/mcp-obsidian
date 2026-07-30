@@ -5,12 +5,21 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { FileSystemBackend } from "./backend/filesystem/index.js";
 import { Health } from "./backend/health.js";
+import { ObsidianLiveService } from "./backend/live.js";
+import { loadRecentPeriodicNotes, PERIODS } from "./backend/periodic/resolve.js";
+import type { PeriodicPeriod } from "./backend/periodic/resolve.js";
 import { RestBackend } from "./backend/rest/index.js";
 import { RestClient } from "./backend/rest/client.js";
 import { resolveRestConfig } from "./backend/rest/config.js";
 import { RoutingBackend } from "./backend/routing.js";
 import type { VaultBackend } from "./backend/types.js";
-import { FileSystemService } from "./filesystem.js";
+import {
+  clamp,
+  FileSystemService,
+  RECENT_CHANGES_DEFAULT_DAYS,
+  RECENT_CHANGES_DEFAULT_LIMIT,
+  RECENT_CHANGES_MAX_LIMIT,
+} from "./filesystem.js";
 import { FrontmatterHandler, parseFrontmatter } from "./frontmatter.js";
 import { PathFilter } from "./pathfilter.js";
 import { SearchService } from "./search.js";
@@ -57,22 +66,31 @@ export function createServer(vaultPath: string, options: CreateServerOptions = {
   // `fileSystem` still serves get_vault_stats and wiki_link directly. Do not remove it.
   const fileSystem = new FileSystemService(resolvedVaultPath, pathFilter, frontmatterHandler);
   const searchService = new SearchService(resolvedVaultPath, pathFilter);
-  const backend = options.backend ?? buildBackend();
 
   /**
-   * With `OBSIDIAN_API_KEY` unset, `resolveRestConfig()` returns `null` and this
-   * is byte-identical to the pre-REST construction: no client, no agent, no
-   * extra request. That is what keeps behavior unchanged when REST is off.
+   * With `OBSIDIAN_API_KEY` unset, `resolveRestConfig()` returns `null` and no
+   * client, agent, or request exists — byte-identical to the pre-REST
+   * construction. That is what keeps behavior unchanged when REST is off.
    */
-  function buildBackend(): VaultBackend {
-    const config = resolveRestConfig(env);
-    if (!config) return new FileSystemBackend(fileSystem);
+  const restConfig = resolveRestConfig(env);
+  const restClient = restConfig ? new RestClient(restConfig) : null;
 
-    const client = new RestClient(config);
+  const backend = options.backend ?? buildBackend();
+  /**
+   * Deliberately outside the backend seam and constructed even when
+   * `restClient` is `null`: the five REST-only tools stay registered and each
+   * raises `ObsidianUnavailableError`, which is more discoverable than a tool
+   * that silently disappears from `ListTools`.
+   */
+  const live = new ObsidianLiveService(restClient, { pathFilter });
+
+  function buildBackend(): VaultBackend {
+    if (!restClient) return new FileSystemBackend(fileSystem);
+
     return new RoutingBackend(
-      new RestBackend(client, { vaultPath: resolvedVaultPath, pathFilter, frontmatterHandler }),
+      new RestBackend(restClient, { vaultPath: resolvedVaultPath, pathFilter, frontmatterHandler }),
       new FileSystemBackend(fileSystem),
-      new Health(client, resolvedVaultPath, { onWarn }),
+      new Health(restClient, resolvedVaultPath, { onWarn }),
     );
   }
 
@@ -296,6 +314,109 @@ export function createServer(vaultPath: string, options: CreateServerOptions = {
             },
             required: ["document"]
           }
+        },
+        {
+          name: "get_periodic_note",
+          description: "Resolve a periodic note from Obsidian's own daily-notes settings and read it. Works with Obsidian closed. Only 'daily' resolves today; the other periods need the 'periodic-notes' community plugin and return an explanatory error. If the resolved note does not exist, the path is still returned with exists=false so it can be created.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              period: { type: "string", enum: [...PERIODS], description: "Which period to resolve (default: 'daily')", default: "daily" },
+              date: { type: "string", description: "Target date as YYYY-MM-DD. Defaults to today in the server's local timezone." },
+              prettyPrint: { type: "boolean", description: "Format JSON response with indentation (default: false)", default: false }
+            }
+          }
+        },
+        {
+          name: "get_document_map",
+          description: "Outline a note: heading hierarchy (paths joined with '::', matching the structural PATCH target format), block reference ids, and frontmatter keys. Headings inside fenced code blocks are ignored. Useful for locating a section before patching without reading the whole note.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "Path to the note relative to vault root" },
+              prettyPrint: { type: "boolean", description: "Format JSON response with indentation (default: false)", default: false }
+            },
+            required: ["path"]
+          }
+        },
+        {
+          name: "get_recent_changes",
+          description: "List vault files modified most recently, newest first. Filesystem-based, so it needs no Obsidian plugin and works with Obsidian closed.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              limit: { type: "number", description: "Maximum number of files to return (default: 10, max: 100)", default: 10 },
+              days: { type: "number", description: "Only include files modified within this many days (default: 90)", default: 90 },
+              prettyPrint: { type: "boolean", description: "Format JSON response with indentation (default: false)", default: false }
+            }
+          }
+        },
+        {
+          name: "get_recent_periodic_notes",
+          description: "Read the most recent periodic notes that exist, newest first. Dates with no note are skipped. Filesystem-based; works with Obsidian closed.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              period: { type: "string", enum: [...PERIODS], description: "Which period to walk back through (default: 'daily')", default: "daily" },
+              limit: { type: "number", description: "How many periods back to look (default: 5, max: 30)", default: 5 },
+              includeContent: { type: "boolean", description: "Include note content (default: true)", default: true },
+              prettyPrint: { type: "boolean", description: "Format JSON response with indentation (default: false)", default: false }
+            }
+          }
+        },
+        {
+          name: "list_commands",
+          description: "List every command registered in the running Obsidian, its own and every plugin's. Requires Obsidian to be running with the Local REST API plugin; fails with a clear error otherwise.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              prettyPrint: { type: "boolean", description: "Format JSON response with indentation (default: false)", default: false }
+            }
+          }
+        },
+        {
+          name: "execute_command",
+          description: "Run a command in the running Obsidian by its id. CONSEQUENTIAL: the id space covers every installed plugin, so a command can modify the vault, change settings, or alter the UI, with no confirmation and no undo. Call list_commands first and only run a command whose effect you are sure of. Requires Obsidian to be running with the Local REST API plugin.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              commandId: { type: "string", description: "Command id from list_commands, e.g. 'app:open-vault'" }
+            },
+            required: ["commandId"]
+          }
+        },
+        {
+          name: "get_active_file",
+          description: "Get the vault path of the note currently focused in Obsidian. Requires Obsidian to be running with the Local REST API plugin.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              prettyPrint: { type: "boolean", description: "Format JSON response with indentation (default: false)", default: false }
+            }
+          }
+        },
+        {
+          name: "open_file",
+          description: "Open a note in the Obsidian UI. Does not return content — use read_note for that. Requires Obsidian to be running with the Local REST API plugin.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "Path to the note relative to vault root" }
+            },
+            required: ["path"]
+          }
+        },
+        {
+          name: "search_vault_advanced",
+          description: "Query Obsidian's own index with a JsonLogic expression (see jsonlogic.com). Dataview DQL is NOT supported. Requires Obsidian to be running with the Local REST API plugin. For plain text search that works with Obsidian closed, use search_notes.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              query: { type: "object", description: "JsonLogic query object, e.g. {\"glob\": [\"*.md\", {\"var\": \"path\"}]}" },
+              prettyPrint: { type: "boolean", description: "Format JSON response with indentation (default: false)", default: false }
+            },
+            required: ["query"]
+          }
         }
       ]
     };
@@ -478,6 +599,96 @@ export function createServer(vaultPath: string, options: CreateServerOptions = {
         case "wiki_link":
           return await handleWikiLinkTool(fileSystem, trimmedArgs);
 
+        case "get_periodic_note": {
+          // The handler owns the clock, never the resolver: a test asserting a
+          // fixed path against an internal `new Date()` would pass once and fail
+          // every day after.
+          const result = await backend.getPeriodicNote({
+            period: parsePeriod(trimmedArgs.period),
+            date: parsePeriodDate(trimmedArgs.date)
+          });
+          const indent = trimmedArgs.prettyPrint ? 2 : undefined;
+          return {
+            content: [{ type: "text", text: JSON.stringify(result, null, indent) }]
+          };
+        }
+
+        case "get_document_map": {
+          const map = await backend.getDocumentMap(trimmedArgs.path);
+          const indent = trimmedArgs.prettyPrint ? 2 : undefined;
+          return {
+            content: [{ type: "text", text: JSON.stringify(map, null, indent) }]
+          };
+        }
+
+        case "get_recent_changes": {
+          const changes = await fileSystem.getRecentChanges({
+            limit: clamp(trimmedArgs.limit, RECENT_CHANGES_DEFAULT_LIMIT, 1, RECENT_CHANGES_MAX_LIMIT),
+            days: clamp(trimmedArgs.days, RECENT_CHANGES_DEFAULT_DAYS, 1, Number.MAX_SAFE_INTEGER)
+          });
+          const indent = trimmedArgs.prettyPrint ? 2 : undefined;
+          return {
+            content: [{ type: "text", text: JSON.stringify(changes, null, indent) }]
+          };
+        }
+
+        case "get_recent_periodic_notes": {
+          const limit = clamp(trimmedArgs.limit, 5, 1, 30);
+          const notes = await loadRecentPeriodicNotes(
+            fileSystem,
+            fileSystem.vaultRoot,
+            parsePeriod(trimmedArgs.period),
+            limit,
+            new Date()
+          );
+          const includeContent = trimmedArgs.includeContent !== false;
+          const payload = includeContent
+            ? notes
+            : notes.map(({ content: _content, ...rest }) => rest);
+          const indent = trimmedArgs.prettyPrint ? 2 : undefined;
+          return {
+            content: [{ type: "text", text: JSON.stringify(payload, null, indent) }]
+          };
+        }
+
+        case "list_commands": {
+          const commands = await live.listCommands();
+          const indent = trimmedArgs.prettyPrint ? 2 : undefined;
+          return {
+            content: [{ type: "text", text: JSON.stringify(commands, null, indent) }]
+          };
+        }
+
+        case "execute_command": {
+          const result = await live.executeCommand(trimmedArgs.commandId);
+          return {
+            content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+          };
+        }
+
+        case "get_active_file": {
+          const active = await live.getActiveFile();
+          const indent = trimmedArgs.prettyPrint ? 2 : undefined;
+          return {
+            content: [{ type: "text", text: JSON.stringify(active, null, indent) }]
+          };
+        }
+
+        case "open_file": {
+          const result = await live.openFile(trimmedArgs.path);
+          return {
+            content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+          };
+        }
+
+        case "search_vault_advanced": {
+          const results = await live.searchVaultAdvanced(trimmedArgs.query);
+          const indent = trimmedArgs.prettyPrint ? 2 : undefined;
+          return {
+            content: [{ type: "text", text: JSON.stringify(results, null, indent) }]
+          };
+        }
+
         default:
           throw new Error(`Unknown tool: ${toolName}`);
       }
@@ -490,6 +701,43 @@ export function createServer(vaultPath: string, options: CreateServerOptions = {
   });
 
   return server;
+}
+
+function parsePeriod(raw: unknown): PeriodicPeriod {
+  if (raw === undefined || raw === null || raw === '') return 'daily';
+  if (typeof raw === 'string' && (PERIODS as readonly string[]).includes(raw)) {
+    return raw as PeriodicPeriod;
+  }
+  throw new Error(`Invalid period: ${String(raw)}. Expected one of ${PERIODS.join(', ')}.`);
+}
+
+/**
+ * `YYYY-MM-DD` in the server's local timezone, or today when omitted.
+ *
+ * Built with `new Date(y, m - 1, d)` rather than `new Date(string)`: the string
+ * form parses as UTC midnight, which is the previous day west of Greenwich, and
+ * a daily note belongs to the user's day.
+ */
+function parsePeriodDate(raw: unknown): Date {
+  if (raw === undefined || raw === null || raw === '') return new Date();
+
+  const match = typeof raw === 'string' ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim()) : null;
+  if (!match) {
+    throw new Error(`Invalid date: ${String(raw)}. Use YYYY-MM-DD.`);
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+
+  // Reject a well-formed but nonexistent date (2026-02-30) rather than letting
+  // Date silently roll it forward into March.
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    throw new Error(`Invalid date: ${String(raw)}. That calendar date does not exist.`);
+  }
+
+  return date;
 }
 
 function trimPaths(args: any): any {

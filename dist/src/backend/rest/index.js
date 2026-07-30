@@ -5,6 +5,8 @@ import { FrontmatterHandler } from "../../frontmatter.js";
 import { PathFilter } from "../../pathfilter.js";
 import { generateObsidianUri } from "../../uri.js";
 import { BackendError } from "../types.js";
+import { buildDocumentMap } from "../documentMap.js";
+import { loadPeriodicNote } from "../periodic/resolve.js";
 import { RestClient } from "./client.js";
 import { pluginVersionWarning } from "./config.js";
 /**
@@ -222,6 +224,24 @@ export class RestBackend {
     async getFrontmatter(inputPath) {
         const note = await this.readNote(inputPath);
         return note.frontmatter;
+    }
+    /**
+     * Resolution reads `.obsidian/daily-notes.json` off the local disk even on
+     * this arm. The plugin's `/periodic/` endpoints only answer for periods the
+     * absent `periodic-notes` plugin would provide, and taking the setting from a
+     * second source would be exactly the drift `get_periodic_note` exists to
+     * avoid. The *read* still routes: it goes through this backend's `readNote`.
+     */
+    getPeriodicNote(params) {
+        return loadPeriodicNote(this, this.vaultPath, params);
+    }
+    /**
+     * Built from the note payload this backend already fetches, so routing the
+     * map costs one mapping rather than a second request.
+     */
+    async getDocumentMap(inputPath) {
+        const note = await this.readNote(inputPath);
+        return buildDocumentMap(note.content, note.frontmatter);
     }
     async readMultipleNotes(params) {
         const { paths, includeContent = true, includeFrontmatter = true } = params;

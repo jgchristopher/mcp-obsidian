@@ -1,5 +1,7 @@
 import { BackendError } from "./types.js";
 import type { VaultBackend } from "./types.js";
+import type { DocumentMap } from "./documentMap.js";
+import type { PeriodicNoteParams, PeriodicNoteResult } from "./periodic/resolve.js";
 import type { HealthGate } from "./health.js";
 import type {
   BatchReadParams,
@@ -48,6 +50,8 @@ export const READ_OPERATIONS: ReadonlySet<string> = new Set([
   "listDirectory",
   "getFrontmatter",
   "listAllTags",
+  "getPeriodicNote",
+  "getDocumentMap",
 ]);
 
 export class RoutingBackend implements VaultBackend {
@@ -135,6 +139,16 @@ export class RoutingBackend implements VaultBackend {
 
   listAllTags(): Promise<Array<{ tag: string; count: number }>> {
     return this.route("listAllTags", undefined, (backend) => backend.listAllTags());
+  }
+
+  getPeriodicNote(params: PeriodicNoteParams): Promise<PeriodicNoteResult> {
+    return this.route("getPeriodicNote", params.period, (backend) =>
+      backend.getPeriodicNote(params),
+    );
+  }
+
+  getDocumentMap(path: string): Promise<DocumentMap> {
+    return this.route("getDocumentMap", path, (backend) => backend.getDocumentMap(path));
   }
 
   // ==========================================================================

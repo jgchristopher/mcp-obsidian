@@ -39,6 +39,13 @@ export interface FixtureOptions {
     apiKey?: string;
     /** Reported as `versions.self` by `GET /`. Defaults to the current floor. */
     pluginVersion?: string;
+    /** Registered commands served by `GET /commands/`. */
+    commands?: Array<{
+        id: string;
+        name: string;
+    }>;
+    /** Vault path reported by `GET /active/`. Absent means no active file (404). */
+    activeFile?: string;
 }
 export interface Fixture {
     port: number;
@@ -47,6 +54,10 @@ export interface Fixture {
     requests: FixtureRequestRecord[];
     /** Live view of the seeded vault, so tests can assert resulting state. */
     files: Map<string, string>;
+    /** Command ids `POST /commands/{id}/` accepted, in order. */
+    executedCommands: string[];
+    /** Paths `POST /open/{path}` accepted, in order. */
+    openedFiles: string[];
 }
 export declare function startFixture(opts?: FixtureOptions): Promise<Fixture>;
 //# sourceMappingURL=fixture-server.d.ts.map

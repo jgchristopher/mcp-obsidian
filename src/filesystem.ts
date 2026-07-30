@@ -36,6 +36,19 @@ export function classifyWriteError(error: unknown, path: string): Error {
   return new Error(`Failed to write file: ${path} - ${error instanceof Error ? error.message : 'Unknown error'}`);
 }
 
+/** `get_recent_changes` defaults, mirroring the Python tool's parameters. */
+export const RECENT_CHANGES_DEFAULT_LIMIT = 10;
+export const RECENT_CHANGES_MAX_LIMIT = 100;
+export const RECENT_CHANGES_DEFAULT_DAYS = 90;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/** Whole number within [min, max], falling back to `fallback` when unusable. */
+export function clamp(raw: unknown, fallback: number, min: number, max: number): number {
+  const value = typeof raw === 'number' ? raw : Number(raw);
+  if (raw === undefined || raw === null || raw === '' || !Number.isFinite(value)) return fallback;
+  return Math.min(Math.max(Math.trunc(value), min), max);
+}
+
 export class FileSystemService {
   private frontmatterHandler: FrontmatterHandler;
   private pathFilter: PathFilter;
@@ -54,6 +67,17 @@ export class FileSystemService {
     }
     this.pathFilter = pathFilter || new PathFilter();
     this.frontmatterHandler = frontmatterHandler || new FrontmatterHandler();
+  }
+
+  /**
+   * The canonical (realpath'd) vault root.
+   *
+   * Read-only, and exposed only because the periodic-note resolver has to read
+   * `.obsidian/daily-notes.json` outside this service — see
+   * `src/backend/periodic/config.ts` for why that read bypasses `PathFilter`.
+   */
+  get vaultRoot(): string {
+    return this.vaultPath;
   }
 
   /**
@@ -1054,7 +1078,23 @@ export class FileSystemService {
     return matches;
   }
 
-  async getVaultStats(recentCount: number = 5): Promise<VaultStats> {
+  /**
+   * One vault walk, shared by `getVaultStats` and `getRecentChanges`.
+   *
+   * Extracted rather than copied: a second traversal with its own
+   * `PathFilter` calls would drift from this one, and two tools reporting
+   * different answers about the same vault is worse than either being slow.
+   *
+   * `recentLimit` bounds the retained list as the walk proceeds, so a large
+   * vault never materializes an array of every file just to keep the top ten.
+   */
+  private async scanVault(options: {
+    recentLimit: number;
+    /** Epoch ms floor: files modified before this are counted but not retained. */
+    modifiedSince?: number;
+  }): Promise<VaultStats> {
+    const { recentLimit, modifiedSince } = options;
+
     let totalNotes = 0;
     let totalFolders = 0;
     let totalSize = 0;
@@ -1085,15 +1125,18 @@ export class FileSystemService {
           // Track recent files
           const fileInfo = { path: entryRelativePath, modified: stats.mtime.getTime() };
 
+          if (recentLimit <= 0) continue;
+          if (modifiedSince !== undefined && fileInfo.modified < modifiedSince) continue;
+
           // Insert in sorted order (most recent first)
           const insertIndex = recentFiles.findIndex(f => f.modified < fileInfo.modified);
           if (insertIndex === -1) {
-            if (recentFiles.length < recentCount) {
+            if (recentFiles.length < recentLimit) {
               recentFiles.push(fileInfo);
             }
           } else {
             recentFiles.splice(insertIndex, 0, fileInfo);
-            if (recentFiles.length > recentCount) {
+            if (recentFiles.length > recentLimit) {
               recentFiles.pop();
             }
           }
@@ -1109,6 +1152,33 @@ export class FileSystemService {
       totalSize,
       recentlyModified: recentFiles
     };
+  }
+
+  async getVaultStats(recentCount: number = 5): Promise<VaultStats> {
+    return this.scanVault({ recentLimit: recentCount });
+  }
+
+  /**
+   * Files modified within the last `days`, newest first.
+   *
+   * Filesystem-native, never routed. The Python server implements the same tool
+   * as a Dataview DQL query, and Dataview is not installed in the target vault,
+   * so `obsidian_get_recent_changes` returns HTTP 400 there today. A vault walk
+   * needs no plugin and keeps working with Obsidian closed.
+   *
+   * `limit` is capped hard: the caller is a language model, and an unbounded
+   * list of a large vault's files is an oversized response, not a useful answer.
+   */
+  async getRecentChanges(options: { limit?: number; days?: number } = {}): Promise<Array<{ path: string; modified: number }>> {
+    // A non-finite argument falls back to the default rather than propagating.
+    // NaN survives Math.min/Math.max unchanged, and a NaN bound silently returns
+    // an empty list — a wrong answer that looks like a correct one.
+    const limit = clamp(options.limit, RECENT_CHANGES_DEFAULT_LIMIT, 1, RECENT_CHANGES_MAX_LIMIT);
+    const days = clamp(options.days, RECENT_CHANGES_DEFAULT_DAYS, 1, Number.MAX_SAFE_INTEGER);
+    const modifiedSince = Date.now() - days * MS_PER_DAY;
+
+    const stats = await this.scanVault({ recentLimit: limit, modifiedSince });
+    return stats.recentlyModified;
   }
 
   async listAllTags(): Promise<Array<{ tag: string; count: number }>> {

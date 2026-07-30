@@ -1,4 +1,6 @@
 import type { FileSystemService } from "../../filesystem.js";
+import type { DocumentMap } from "../documentMap.js";
+import type { PeriodicNoteParams, PeriodicNoteResult } from "../periodic/resolve.js";
 import type { VaultBackend } from "../types.js";
 import type { ParsedNote, NoteWriteParams, PatchNoteParams, PatchNoteResult, DeleteNoteParams, DeleteResult, DirectoryListing, MoveNoteParams, MoveFileParams, MoveResult, BatchReadParams, BatchReadResult, UpdateFrontmatterParams, NoteInfo, TagManagementParams, TagManagementResult } from "../../types.js";
 /**
@@ -34,5 +36,13 @@ export declare class FileSystemBackend implements VaultBackend {
         tag: string;
         count: number;
     }>>;
+    /**
+     * Both new members delegate to the same shared functions the REST arm calls,
+     * over content this backend already has. Sharing the implementation is what
+     * makes the contract suite's "identical output" assertion true by
+     * construction rather than by two parallel implementations agreeing today.
+     */
+    getPeriodicNote(params: PeriodicNoteParams): Promise<PeriodicNoteResult>;
+    getDocumentMap(path: string): Promise<DocumentMap>;
 }
 //# sourceMappingURL=index.d.ts.map

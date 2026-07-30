@@ -43,6 +43,10 @@ export interface FixtureOptions {
   apiKey?: string;
   /** Reported as `versions.self` by `GET /`. Defaults to the current floor. */
   pluginVersion?: string;
+  /** Registered commands served by `GET /commands/`. */
+  commands?: Array<{ id: string; name: string }>;
+  /** Vault path reported by `GET /active/`. Absent means no active file (404). */
+  activeFile?: string;
 }
 
 export interface Fixture {
@@ -52,7 +56,18 @@ export interface Fixture {
   requests: FixtureRequestRecord[];
   /** Live view of the seeded vault, so tests can assert resulting state. */
   files: Map<string, string>;
+  /** Command ids `POST /commands/{id}/` accepted, in order. */
+  executedCommands: string[];
+  /** Paths `POST /open/{path}` accepted, in order. */
+  openedFiles: string[];
 }
+
+const DEFAULT_COMMANDS: Array<{ id: string; name: string }> = [
+  { id: "app:open-vault", name: "Open another vault" },
+  { id: "editor:toggle-bold", name: "Toggle bold" },
+];
+
+const JSON_LOGIC = "application/vnd.olrapi.jsonlogic+json";
 
 const frontmatter = new FrontmatterHandler();
 
@@ -208,6 +223,9 @@ function applyPatch(
 export function startFixture(opts: FixtureOptions = {}): Promise<Fixture> {
   const files = new Map<string, string>(Object.entries(opts.files ?? {}));
   const requests: FixtureRequestRecord[] = [];
+  const commands = opts.commands ?? DEFAULT_COMMANDS;
+  const executedCommands: string[] = [];
+  const openedFiles: string[] = [];
   let failWith = opts.failWith;
 
   const server: Server = createServer((req, res) => {
@@ -272,6 +290,8 @@ export function startFixture(opts: FixtureOptions = {}): Promise<Fixture> {
       return;
     }
 
+    if (handleLive(req, res, method, url, body)) return;
+
     if (!url.startsWith("/vault/")) {
       sendError(res, 404, `No route for ${method} ${url}`);
       return;
@@ -307,6 +327,93 @@ export function startFixture(opts: FixtureOptions = {}): Promise<Fixture> {
     }
 
     handleFile(req, res, method, path, body);
+  }
+
+  /**
+   * The four endpoints behind `ObsidianLiveService`. Returns true when the
+   * request was handled here, so the vault routes below stay untouched.
+   */
+  function handleLive(
+    req: IncomingMessage,
+    res: ServerResponse,
+    method: string,
+    url: string,
+    body: string,
+  ): boolean {
+    if (url === "/commands/" && method === "GET") {
+      sendJson(res, 200, { commands });
+      return true;
+    }
+
+    if (url.startsWith("/commands/") && method === "POST") {
+      let id: string;
+      try {
+        id = decodeURIComponent(url.slice("/commands/".length).replace(/\/$/, ""));
+      } catch {
+        sendError(res, 400, "Malformed percent-encoding in command id.");
+        return true;
+      }
+      if (!commands.some((command) => command.id === id)) {
+        sendError(res, 404, `Command not found: ${id}`);
+        return true;
+      }
+      executedCommands.push(id);
+      res.writeHead(204);
+      res.end();
+      return true;
+    }
+
+    if (url === "/active/" && method === "GET") {
+      const active = opts.activeFile;
+      if (active === undefined) {
+        sendError(res, 404, "File does not exist.");
+        return true;
+      }
+      sendJson(res, 200, noteJson(active, files.get(active) ?? ""));
+      return true;
+    }
+
+    if (url.startsWith("/open/") && method === "POST") {
+      try {
+        openedFiles.push(decodeVaultPath(url.slice("/open/".length)));
+      } catch {
+        sendError(res, 400, "Malformed percent-encoding in path.");
+        return true;
+      }
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end("");
+      return true;
+    }
+
+    if (url === "/search/" && method === "POST") {
+      const contentType = String(req.headers["content-type"] ?? "");
+      if (!contentType.includes(JSON_LOGIC)) {
+        // What the real plugin answers for a Dataview DQL query with the
+        // Dataview plugin absent, which is the situation in the target vault.
+        sendJson(res, 400, {
+          errorCode: 40012,
+          message: "Invalid Content-Type; Dataview is not enabled in this vault.",
+        });
+        return true;
+      }
+      // Not a JsonLogic engine: the fixture proves the verb, headers, and body
+      // round-trip. Evaluating the expression would be reimplementing the plugin.
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        sendError(res, 400, "Malformed JsonLogic body.");
+        return true;
+      }
+      sendJson(
+        res,
+        200,
+        [...files.keys()].sort().map((filename) => ({ filename, result: parsed })),
+      );
+      return true;
+    }
+
+    return false;
   }
 
   function handleFile(
@@ -443,6 +550,8 @@ export function startFixture(opts: FixtureOptions = {}): Promise<Fixture> {
         port: address.port,
         requests,
         files,
+        executedCommands,
+        openedFiles,
         close: () =>
           new Promise<void>((done, fail) => {
             // Keep-alive sockets outlive close(); drop them so the promise settles.

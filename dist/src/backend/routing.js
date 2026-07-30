@@ -26,6 +26,8 @@ export const READ_OPERATIONS = new Set([
     "listDirectory",
     "getFrontmatter",
     "listAllTags",
+    "getPeriodicNote",
+    "getDocumentMap",
 ]);
 export class RoutingBackend {
     rest;
@@ -96,6 +98,12 @@ export class RoutingBackend {
     }
     listAllTags() {
         return this.route("listAllTags", undefined, (backend) => backend.listAllTags());
+    }
+    getPeriodicNote(params) {
+        return this.route("getPeriodicNote", params.period, (backend) => backend.getPeriodicNote(params));
+    }
+    getDocumentMap(path) {
+        return this.route("getDocumentMap", path, (backend) => backend.getDocumentMap(path));
     }
     // ==========================================================================
     // WRITES
