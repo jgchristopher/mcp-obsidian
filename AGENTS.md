@@ -25,9 +25,6 @@ npm run publish:dry     # Dry run
 npm run publish:beta    # Publish with beta tag
 npm run publish:latest  # Publish as latest
 
-# Website
-npm run website         # Start Astro dev server with Bun (http://localhost:4321)
-
 # MCP Inspector
 npx @modelcontextprotocol/inspector npm start /path/to/vault
 ```
@@ -37,35 +34,43 @@ npx @modelcontextprotocol/inspector npm start /path/to/vault
 ### File Structure
 
 ```
-server.ts              # MCP server entry point, tool registration, request handlers
+server.ts              # Entry point — CLI args, stdio transport, shutdown
 src/
+  createServer.ts      # Tool registration and request handlers (all 25 tools)
   filesystem.ts        # FileSystemService — all file operations with security
   frontmatter.ts       # FrontmatterHandler — YAML parsing via gray-matter
   pathfilter.ts        # PathFilter — security layer for path validation
   search.ts            # SearchService — full-text search with token-optimized output
   uri.ts               # Obsidian URI generation
   types.ts             # All TypeScript interfaces
+  wikilink/            # [[wiki link]] resolution and its tool
   backend/             # VaultBackend seam (see "Local REST API backend")
     types.ts           # VaultBackend interface, BackendFailure taxonomy
     routing.ts         # RoutingBackend — REST-preferred routing, fallback policy
     health.ts          # Health — reachability flag + vault fingerprint guard
+    live.ts            # LiveBackend — the five Obsidian-only tools
+    documentMap.ts     # buildDocumentMap — headings, block refs, frontmatter keys
+    parity.ts          # Tool-to-REST mapping table
+    periodic/          # Daily-note resolution from .obsidian/daily-notes.json
     filesystem/        # FileSystemBackend — adapter over FileSystemService
     rest/              # RestBackend, RestClient, config
     contract.test.ts   # One behavioral contract, run against both backends
     testing/           # fixture-server.ts (REST double) + seed.ts (paired vault)
   *.test.ts            # Co-located test files
-website/               # Astro 5 website (separate package, see website/AGENTS.md)
+scripts/               # backend-bench, parity-smoke, preflight, triage
 ```
 
 ### Core Components
 
-**server.ts** — Entry point. Registers 25 MCP tools, handles CLI args (--help, --version, vault path), initializes services, routes tool calls. Auto-trims whitespace from all path arguments. Exits on stdin EOF / SIGTERM / SIGINT (graceful `server.close()`), otherwise hosts orphan the process (#159).
+**server.ts** — Entry point, ~90 lines. Handles CLI args (--help, --version, vault path), builds the stdio transport, and exits on stdin EOF / SIGTERM / SIGINT (graceful `server.close()`), otherwise hosts orphan the process (#159). It registers no tools itself.
+
+**createServer** (`src/createServer.ts`) — Registers all 25 MCP tools, initializes services, routes tool calls. Auto-trims whitespace from all path arguments. Builds a `RoutingBackend` when `OBSIDIAN_API_KEY` is set and a plain `FileSystemBackend` otherwise.
 
 **FileSystemService** (`src/filesystem.ts`) — Orchestrates file ops with security. Path resolution and traversal prevention. Implements: read, write, patch, delete, move, list, batch read, frontmatter update, tag management, vault stats. Uses native `fs/promises`.
 
 **FrontmatterHandler** (`src/frontmatter.ts`) — Parses/stringifies YAML frontmatter via `gray-matter`. Validates structure (blocks functions, symbols, invalid types). Preserves original content.
 
-**PathFilter** (`src/pathfilter.ts`) — Blocks `.obsidian/`, `.git/`, `node_modules/`, system files, dot files. Note tools allow `.md`, `.markdown`, `.txt`; directory listings may include other file types by filename. Checks path components independently.
+**PathFilter** (`src/pathfilter.ts`) — Blocks `.obsidian/`, `.git/`, `node_modules/`, system files, and **any segment starting with `.` at any depth** — so `.env` and `.secrets.md` are refused even though `.md` is an allowed extension. Note tools allow `.md`, `.markdown`, `.txt`; directory listings may include other file types by filename. Checks path components independently.
 
 **SearchService** (`src/search.ts`) — Content and frontmatter search with multi-word matching and BM25 relevance reranking. Returns token-optimized results with minified field names: `{p, t, ex, mc, ln, uri}`. Max 20 results.
 
@@ -133,18 +138,7 @@ server's `vaultPath`.
 - **Frontmatter**: Always use FrontmatterHandler for read/write. `originalContent` field has raw file content. Empty frontmatter = no YAML block.
 - **Write modes**: overwrite (default), append (content to end, merge frontmatter), prepend (content to beginning, merge frontmatter)
 - **Patch**: Exact string match including whitespace/newlines. `replaceAll: false` (default) fails on multiple matches to prevent accidents.
-- **Version**: Read from `package.json` at runtime. Used in MCP server init, --version flag, and website nav badge.
-
-## Website (Dual Content)
-
-The `website/` directory is a separate Astro package. It serves content in two formats that **must be kept in sync**:
-
-| Format | Location | Audience |
-|--------|----------|----------|
-| HTML (rich, interactive) | `website/src/components/` | Browsers |
-| Markdown (plain text) | `website/public/*.md` + `llm.txt` | LLMs and AI agents |
-
-When updating content, always update both. See `website/AGENTS.md` for full details and file mapping.
+- **Version**: Read from `package.json` at runtime. Used in MCP server init and the --version flag.
 
 ## Local REST API backend
 
@@ -234,13 +228,30 @@ When modifying file operations:
 - `tsconfig.build.json` — Build config (excludes tests, outputs to `dist/`)
 - `vitest.config.ts` — Test config (globals, node environment)
 
+## Fork
+
+This repo is a fork. `origin` is `jgchristopher/mcp-obsidian`; `upstream` is
+`bitbonsai/mcpvault`, which it branched from at `6bef558` (v0.12.5). Upstream
+has moved on by ~180 commits and is on 0.16.0; the REST backend, the nine
+extra tools, and `docs/ideation/` are this fork's and exist nowhere upstream.
+
+The hazard is **convergent implementation**, not merge conflicts. Both trees
+solved the same problems in differently-named files, so an upstream fix often
+applies to code here under another name and `git merge` will never say so —
+upstream's fence fixes landed in a `getNoteOutline` this fork lacks, while the
+same bugs sat in `src/backend/documentMap.ts`. Before dismissing an upstream
+commit as inapplicable, look for this fork's equivalent of the file it touches.
+
+Nothing here deploys a website. mcpvault.org is upstream's domain, served from
+upstream's repo.
+
 ## Gotchas
 
 - `dist/` is committed. Every src change needs `npm run build` + commit dist in the SAME change; src-only merges leave dist stale (happened twice: fde15eb engine swap, PR #151).
 - TypeScript toolchain upgrades change dist output (TS7 altered `.d.ts.map` sourcemaps only) — rebuild + commit dist after any TS bump or the dirty tree blocks automation that requires clean main.
 - Claude Code discovers skills only under `.claude/skills/`; repo keeps them in `skills/`. Committed symlink `.claude/skills/triage -> ../../skills/triage` bridges it — same pattern for any new skill.
-- `pathFilter.isAllowed` + `normalizePath` must guard EVERY new tool's path input (PR #146 blocker: `readNoteLines` skipped them = read `.obsidian/` files). Mirror `readNote`'s guard block.
-- Outline/heading parsing must be fence-aware: `#` lines inside ``` blocks are not headings (`patch_note` has prior art).
+- `pathFilter.isAllowed` + `normalizePath` must guard EVERY new tool's path input (upstream PR #146 blocker: a `readNoteLines` tool, which this fork does not carry, skipped them = read `.obsidian/` files). Mirror `readNote`'s guard block.
+- Outline/heading parsing must be fence-aware: `#` lines inside ``` blocks are not headings. `src/backend/documentMap.ts` is the only fence parser in the tree — `patch_note` is exact-string find-and-replace and parses nothing. Its headings follow CommonMark: up to 3 spaces of indent, optional text (bare `#`), and a closer only on whitespace after the run. The required space before the text is what keeps an Obsidian tag like `#project` from matching. Heading paths feed the REST `PATCH` `Target` header verbatim, so a mis-parsed heading is a reachable write target, not just a wrong listing.
 - The REST port default is **27123**, not the 27124 the plugin's OpenAPI document implies. Those are shipped defaults; the real ports come from the vault's plugin settings, and on jcOS HTTPS listens on 27123 with the insecure server disabled. A 27124 default fails every connection and looks exactly like "REST just never helps".
 - Never touch `NODE_TLS_REJECT_UNAUTHORIZED`. It disables certificate validation for every outbound request in the process. The plugin's self-signed cert is handled by `rejectUnauthorized` on `RestClient`'s own agent — the only permitted site (`grep -rn rejectUnauthorized src/backend/rest/`).
 - The fingerprint compares **only root-level `.md` filenames**. The plugin builds `/vault/` from `getFiles()` so it omits empty directories, while `PathFilter` drops dotfiles and restricted directories — comparing full listings mismatches on a correctly configured machine and silently pins the server to filesystem-only.

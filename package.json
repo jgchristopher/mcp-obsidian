@@ -25,7 +25,6 @@
   ],
   "scripts": {
     "start": "tsx server.ts",
-    "website": "cd website && bun dev",
     "build": "tsc --project tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",

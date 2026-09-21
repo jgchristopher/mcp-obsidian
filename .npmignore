@@ -58,6 +58,3 @@ yarn-error.log*
 
 # Dependencies
 node_modules/
-
-# Website (monorepo)
-website/
