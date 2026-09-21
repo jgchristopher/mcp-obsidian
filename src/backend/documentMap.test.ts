@@ -98,4 +98,31 @@ describe("buildDocumentMap", () => {
   test("treats missing frontmatter as no keys", () => {
     expect(buildDocumentMap("# X\n", undefined).frontmatterKeys).toEqual([]);
   });
+  // CommonMark conformance. Upstream bitbonsai/mcpvault fixed the equivalent
+  // cases in its own getNoteOutline (7549243, 7aced58); this fork's parser is a
+  // separate implementation that missed the same three.
+
+  test("recognizes an ATX heading indented up to three spaces", () => {
+    const map = buildDocumentMap("  ## Indented\n", {});
+
+    expect(map.headings).toEqual([{ path: "Indented", level: 2, line: 1 }]);
+  });
+
+  test("ignores a heading indented four or more spaces", () => {
+    expect(buildDocumentMap("    # Code block\n", {}).headings).toEqual([]);
+  });
+
+  test("recognizes a heading with no text", () => {
+    expect(buildDocumentMap("#\n", {}).headings).toEqual([{ path: "", level: 1, line: 1 }]);
+  });
+
+  test("treats an all-hashes heading as empty rather than literal hashes", () => {
+    expect(buildDocumentMap("## ##\n", {}).headings).toEqual([{ path: "", level: 2, line: 1 }]);
+  });
+
+  test("does not close a fence on a line with trailing text after the markers", () => {
+    const content = ["```", "code", "```js", "# not a heading", "```", "# Real"].join("\n");
+
+    expect(buildDocumentMap(content, {}).headings).toEqual([{ path: "Real", level: 1, line: 6 }]);
+  });
 });

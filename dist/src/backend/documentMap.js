@@ -6,13 +6,24 @@
  * routing this costs one mapping rather than a second request — and sharing the
  * function is what makes the two arms produce byte-identical output.
  */
-/** ``` or ~~~ opening or closing a fenced block, up to three leading spaces. */
-const FENCE = /^ {0,3}(`{3,}|~{3,})/;
-const HEADING = /^(#{1,6})[ \t]+(.*)$/;
+/**
+ * ``` or ~~~ opening or closing a fenced block, up to three leading spaces.
+ * Group 2 is whatever follows the run: an opener may carry a language tag, but
+ * a closer may be followed only by whitespace.
+ */
+const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+/**
+ * ATX heading, per CommonMark: up to three leading spaces, and the text is
+ * optional so a bare `#` is a heading. The space before the text is required,
+ * which is what keeps an Obsidian tag like `#project` from matching.
+ */
+const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/;
 /** A trailing `^id` is Obsidian's block reference. Ids allow letters, digits, `-`. */
 const BLOCK_REF = /(?:^|\s)\^([A-Za-z0-9-]+)[ \t]*$/;
 /** ATX closing sequence, e.g. `## Title ##`, which is not part of the title. */
 const CLOSING_HASHES = /[ \t]+#+[ \t]*$/;
+/** A title made only of #s is an empty heading plus its closing sequence. */
+const ALL_HASHES = /^#+$/;
 /**
  * Build the map.
  *
@@ -44,8 +55,10 @@ export function buildDocumentMap(content, frontmatter) {
                 continue;
             }
             // A fence closes only on the same character, at least as long as the one
-            // that opened it. Anything else is content inside the block.
-            if (marker === fenceMarker && run.length >= fenceLength) {
+            // that opened it, and with nothing but whitespace after the run. Anything
+            // else — a shorter run, another character, or a trailing language tag —
+            // is content inside the block.
+            if (marker === fenceMarker && run.length >= fenceLength && fence[2].trim() === "") {
                 fenceMarker = null;
                 fenceLength = 0;
             }
@@ -56,7 +69,10 @@ export function buildDocumentMap(content, frontmatter) {
         const heading = HEADING.exec(line);
         if (heading) {
             const level = heading[1].length;
-            const title = heading[2].replace(CLOSING_HASHES, "").trim();
+            const rawTitle = (heading[2] ?? "").trim();
+            // `## ##` is an empty heading with a closing sequence, not a heading
+            // whose text is literally "##".
+            const title = ALL_HASHES.test(rawTitle) ? "" : rawTitle.replace(CLOSING_HASHES, "").trim();
             while (ancestors.length > level - 1)
                 ancestors.pop();
             // A note that jumps H1 -> H3 leaves a gap; an empty placeholder keeps the
