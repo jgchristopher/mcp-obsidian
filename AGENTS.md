@@ -36,7 +36,7 @@ npx @modelcontextprotocol/inspector npm start /path/to/vault
 ```
 server.ts              # Entry point — CLI args, stdio transport, shutdown
 src/
-  createServer.ts      # Tool registration and request handlers (all 25 tools)
+  createServer.ts      # Tool registration and request handlers (all 26 tools)
   filesystem.ts        # FileSystemService — all file operations with security
   frontmatter.ts       # FrontmatterHandler — YAML parsing via gray-matter
   pathfilter.ts        # PathFilter — security layer for path validation
@@ -98,6 +98,7 @@ otherwise. The other two groups always take one path, no matter the config.
 | manage_tags | Add, remove, or list tags |
 | list_all_tags | List all tags across the vault with occurrence counts |
 | get_periodic_note | Resolve a daily note from `.obsidian/daily-notes.json` (daily only; other periods need the periodic-notes plugin) |
+| create_periodic_note | Return today's daily note, creating it from the configured template first. Obsidian's own `daily-notes` command when Obsidian is running, core-token rendering here when it is not. Idempotent |
 | get_document_map | Headings, block refs, and frontmatter keys for a note |
 
 **Filesystem-only — never reaches REST (5)**

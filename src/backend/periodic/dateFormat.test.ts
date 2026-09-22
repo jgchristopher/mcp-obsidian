@@ -42,10 +42,27 @@ describe("formatDate", () => {
       expect(() => formatDate(format, JULY_30_2026)).toThrow(UnsupportedDateTokenError);
       expect(() => formatDate(format, JULY_30_2026)).toThrow(
         `Unsupported date token '${token}' in daily-notes format '${format}'. ` +
-          `Only YYYY, MM, and DD are supported.`,
+          `Only YYYY, MM, DD, HH, mm, and ss are supported.`,
       );
     });
   }
+
+  /**
+   * Clock tokens exist for `{{time}}` in a daily-note template, which Obsidian
+   * fills from the clock. The date tokens above stay the only ones a *path*
+   * format needs.
+   */
+  test("substitutes the hour and minute", () => {
+    expect(formatDate("HH:mm", new Date(2026, 6, 30, 6, 45))).toBe("06:45");
+  });
+
+  test("substitutes seconds", () => {
+    expect(formatDate("HH:mm:ss", new Date(2026, 6, 30, 23, 9, 4))).toBe("23:09:04");
+  });
+
+  test("reads the hour on a 24-hour clock", () => {
+    expect(formatDate("HH", new Date(2026, 6, 30, 18, 0))).toBe("18");
+  });
 
   test("names the whole alphabetic run, not the first recognizable prefix", () => {
     // A chained-replace implementation would turn "YYYYY" into "2026Y" and

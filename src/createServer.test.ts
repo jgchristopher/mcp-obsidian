@@ -38,10 +38,11 @@ test("server registers 25 tools", async () => {
   ]);
 
   const result = await client.listTools();
-  expect(result.tools).toHaveLength(25);
+  expect(result.tools).toHaveLength(26);
 
   const toolNames = result.tools.map((t) => t.name).sort();
   expect(toolNames).toEqual([
+    "create_periodic_note",
     "delete_note",
     "execute_command",
     "get_active_file",

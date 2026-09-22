@@ -17,6 +17,12 @@ export interface DailyNotesConfig {
     folder: string;
     /** Obsidian date format, e.g. `YYYY/MM/YYYY-MM-DD`. */
     format: string;
+    /**
+     * Vault-relative template a new daily note starts from, when one is set.
+     * Absent when the setting is missing or blank, which is Obsidian's own "no
+     * template, start empty".
+     */
+    template?: string;
 }
 /** What Obsidian falls back to when the setting is present but blank. */
 export declare const DEFAULT_DAILY_NOTES_FORMAT = "YYYY-MM-DD";

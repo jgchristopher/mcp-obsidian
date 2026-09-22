@@ -1,11 +1,15 @@
 /**
  * Date substitution for Obsidian's daily-notes format string.
  *
- * Deliberately tiny: `YYYY`, `MM`, `DD`, and nothing else. Weekly and longer
- * periods need the `periodic-notes` community plugin, which is not installed in
- * the target vault, so `dddd`, `Do`, `W`, and `Q` would be code no in-scope goal
- * exercises. An unrecognized token is therefore an error, not a pass-through:
- * a silently wrong token resolves a plausible-looking path to the wrong note.
+ * Deliberately tiny: `YYYY`, `MM`, `DD` for dates, plus `HH`, `mm`, `ss` for
+ * the clock. Weekly and longer periods need the `periodic-notes` community
+ * plugin, which is not installed in the target vault, so `dddd`, `Do`, `W`, and
+ * `Q` would be code no in-scope goal exercises. An unrecognized token is
+ * therefore an error, not a pass-through: a silently wrong token resolves a
+ * plausible-looking path to the wrong note.
+ *
+ * The clock tokens exist for `{{time}}` in a daily-note template, which is the
+ * one place a *time* is substituted. A path format needs only the date three.
  */
 
 export class UnsupportedDateTokenError extends Error {
@@ -15,7 +19,7 @@ export class UnsupportedDateTokenError extends Error {
   ) {
     super(
       `Unsupported date token '${token}' in daily-notes format '${format}'. ` +
-        `Only YYYY, MM, and DD are supported.`,
+        `Only YYYY, MM, DD, HH, mm, and ss are supported.`,
     );
     this.name = "UnsupportedDateTokenError";
   }
@@ -71,6 +75,12 @@ function substitute(token: string, format: string, date: Date): string {
       return String(date.getMonth() + 1).padStart(2, "0");
     case "DD":
       return String(date.getDate()).padStart(2, "0");
+    case "HH":
+      return String(date.getHours()).padStart(2, "0");
+    case "mm":
+      return String(date.getMinutes()).padStart(2, "0");
+    case "ss":
+      return String(date.getSeconds()).padStart(2, "0");
     default:
       throw new UnsupportedDateTokenError(token, format);
   }

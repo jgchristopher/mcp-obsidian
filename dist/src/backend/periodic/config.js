@@ -39,14 +39,18 @@ export async function readDailyNotesConfig(vaultPath) {
         throw new Error(`Malformed daily-notes settings at ${configPath}: expected a JSON object.`);
     }
     // Obsidian omits keys left at their default, so a present-but-partial file is
-    // normal and the documented defaults apply. `template` is read by Obsidian and
-    // ignored here — this project never creates a note from a template.
+    // normal and the documented defaults apply. `template` is carried through for
+    // `createPeriodicNote`, which starts a new daily note from it when Obsidian is
+    // closed and cannot run its own template pipeline.
     const record = parsed;
     const folder = typeof record.folder === "string" ? record.folder : "";
     const format = typeof record.format === "string" && record.format.trim() !== ""
         ? record.format
         : DEFAULT_DAILY_NOTES_FORMAT;
-    return { folder, format };
+    const template = typeof record.template === "string" && record.template.trim() !== ""
+        ? record.template
+        : undefined;
+    return template === undefined ? { folder, format } : { folder, format, template };
 }
 function describe(error) {
     return error instanceof Error ? error.message : String(error);

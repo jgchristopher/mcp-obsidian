@@ -134,7 +134,7 @@ MCP is an open protocol. You're not tied to any specific vendor or platform. You
   - Metadata: `get_frontmatter`, `update_frontmatter`, `get_notes_info`, `get_vault_stats`, `get_document_map`
   - Tag management: `manage_tags` (add, remove, list), `list_all_tags`
   - Links: `wiki_link`
-  - Periodic notes: `get_periodic_note`, `get_recent_periodic_notes`
+  - Periodic notes: `get_periodic_note`, `get_recent_periodic_notes`, `create_periodic_note` (creates today's note from your daily-note template)
   - History: `get_recent_changes`
   - Requires a running Obsidian: `list_commands`, `execute_command`, `get_active_file`, `open_file`, `search_vault_advanced`
 - ✅ Write modes: `overwrite`, `append`, `prepend` for flexible content editing

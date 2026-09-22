@@ -58,12 +58,22 @@ describe("readDailyNotesConfig", () => {
     expect(await readDailyNotesConfig(vaultPath)).toBeNull();
   });
 
-  test("reads folder and format, ignoring template", async () => {
+  test("reads folder, format, and the template the note is created from", async () => {
     await writeConfig(JCOS_CONFIG);
 
     expect(await readDailyNotesConfig(vaultPath)).toEqual({
       folder: "Daily_Notes",
       format: "YYYY/MM/YYYY-MM-DD",
+      template: "templates/daily.md",
+    });
+  });
+
+  test("reports no template when the settings file names none", async () => {
+    await writeConfig({ folder: "Daily_Notes", format: "YYYY-MM-DD", template: "  " });
+
+    expect(await readDailyNotesConfig(vaultPath)).toEqual({
+      folder: "Daily_Notes",
+      format: "YYYY-MM-DD",
     });
   });
 

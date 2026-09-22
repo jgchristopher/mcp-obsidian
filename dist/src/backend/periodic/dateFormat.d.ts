@@ -1,11 +1,15 @@
 /**
  * Date substitution for Obsidian's daily-notes format string.
  *
- * Deliberately tiny: `YYYY`, `MM`, `DD`, and nothing else. Weekly and longer
- * periods need the `periodic-notes` community plugin, which is not installed in
- * the target vault, so `dddd`, `Do`, `W`, and `Q` would be code no in-scope goal
- * exercises. An unrecognized token is therefore an error, not a pass-through:
- * a silently wrong token resolves a plausible-looking path to the wrong note.
+ * Deliberately tiny: `YYYY`, `MM`, `DD` for dates, plus `HH`, `mm`, `ss` for
+ * the clock. Weekly and longer periods need the `periodic-notes` community
+ * plugin, which is not installed in the target vault, so `dddd`, `Do`, `W`, and
+ * `Q` would be code no in-scope goal exercises. An unrecognized token is
+ * therefore an error, not a pass-through: a silently wrong token resolves a
+ * plausible-looking path to the wrong note.
+ *
+ * The clock tokens exist for `{{time}}` in a daily-note template, which is the
+ * one place a *time* is substituted. A path format needs only the date three.
  */
 export declare class UnsupportedDateTokenError extends Error {
     readonly token: string;

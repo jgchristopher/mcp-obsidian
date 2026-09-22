@@ -6,6 +6,7 @@ import {
 import { FileSystemBackend } from "./backend/filesystem/index.js";
 import { Health } from "./backend/health.js";
 import { ObsidianLiveService } from "./backend/live.js";
+import { createPeriodicNote } from "./backend/periodic/create.js";
 import { loadRecentPeriodicNotes, PERIODS } from "./backend/periodic/resolve.js";
 import type { PeriodicPeriod } from "./backend/periodic/resolve.js";
 import { RestBackend } from "./backend/rest/index.js";
@@ -328,6 +329,18 @@ export function createServer(vaultPath: string, options: CreateServerOptions = {
           }
         },
         {
+          name: "create_periodic_note",
+          description: "Create today's daily note the way Obsidian would, and return it. Idempotent: an existing note is returned untouched, so a skill that runs twice a day never clobbers the earlier run. With Obsidian running, it triggers Obsidian's own 'daily-notes' command, so the vault's full template pipeline applies (including Templater) and the note opens in the UI. With Obsidian closed, it renders the configured template here, filling only the core {{date}}, {{time}} and {{title}} tokens and reporting anything it could not render in 'unrendered'. Only 'daily' is supported. A date other than today always uses the template path, because Obsidian's command only creates today's note.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              period: { type: "string", enum: [...PERIODS], description: "Which period to create (default: 'daily')", default: "daily" },
+              date: { type: "string", description: "Target date as YYYY-MM-DD. Defaults to today in the server's local timezone." },
+              prettyPrint: { type: "boolean", description: "Format JSON response with indentation (default: false)", default: false }
+            }
+          }
+        },
+        {
           name: "get_document_map",
           description: "Outline a note: heading hierarchy (paths joined with '::', matching the structural PATCH target format), block reference ids, and frontmatter keys. Headings inside fenced code blocks are ignored. Useful for locating a section before patching without reading the whole note.",
           inputSchema: {
@@ -607,6 +620,27 @@ export function createServer(vaultPath: string, options: CreateServerOptions = {
             period: parsePeriod(trimmedArgs.period),
             date: parsePeriodDate(trimmedArgs.date)
           });
+          const indent = trimmedArgs.prettyPrint ? 2 : undefined;
+          return {
+            content: [{ type: "text", text: JSON.stringify(result, null, indent) }]
+          };
+        }
+
+        case "create_periodic_note": {
+          // Same clock rule as `get_periodic_note`: the handler owns it.
+          // `live.executeCommand` throws when Obsidian is not reachable, which
+          // is how the create falls back to rendering the template itself.
+          const result = await createPeriodicNote(
+            {
+              vaultPath: fileSystem.vaultRoot,
+              backend,
+              runCommand: (commandId) => live.executeCommand(commandId)
+            },
+            {
+              period: parsePeriod(trimmedArgs.period),
+              date: parsePeriodDate(trimmedArgs.date)
+            }
+          );
           const indent = trimmedArgs.prettyPrint ? 2 : undefined;
           return {
             content: [{ type: "text", text: JSON.stringify(result, null, indent) }]

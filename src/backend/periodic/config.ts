@@ -21,6 +21,12 @@ export interface DailyNotesConfig {
   folder: string;
   /** Obsidian date format, e.g. `YYYY/MM/YYYY-MM-DD`. */
   format: string;
+  /**
+   * Vault-relative template a new daily note starts from, when one is set.
+   * Absent when the setting is missing or blank, which is Obsidian's own "no
+   * template, start empty".
+   */
+  template?: string;
 }
 
 /** What Obsidian falls back to when the setting is present but blank. */
@@ -67,16 +73,21 @@ export async function readDailyNotesConfig(vaultPath: string): Promise<DailyNote
   }
 
   // Obsidian omits keys left at their default, so a present-but-partial file is
-  // normal and the documented defaults apply. `template` is read by Obsidian and
-  // ignored here — this project never creates a note from a template.
+  // normal and the documented defaults apply. `template` is carried through for
+  // `createPeriodicNote`, which starts a new daily note from it when Obsidian is
+  // closed and cannot run its own template pipeline.
   const record = parsed as Record<string, unknown>;
   const folder = typeof record.folder === "string" ? record.folder : "";
   const format =
     typeof record.format === "string" && record.format.trim() !== ""
       ? record.format
       : DEFAULT_DAILY_NOTES_FORMAT;
+  const template =
+    typeof record.template === "string" && record.template.trim() !== ""
+      ? record.template
+      : undefined;
 
-  return { folder, format };
+  return template === undefined ? { folder, format } : { folder, format, template };
 }
 
 function describe(error: unknown): string {
